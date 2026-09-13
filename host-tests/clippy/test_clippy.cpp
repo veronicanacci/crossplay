@@ -1,0 +1,316 @@
+// Clippy Facts, built and tapped without a device.
+//
+// The two things worth testing here are the two things that can silently be
+// wrong: that the rect Clippy is DRAWN in is the rect a tap is measured
+// against, and that the next fact is never the fact already on the panel. Both
+// are one-line rules that a screenshot cannot check -- a picture of the right
+// Clippy in the wrong hit target looks exactly like a working app.
+//
+// Deliberately its own suite rather than lines added to host-tests/ui: that
+// file is 12k lines shared by every screen in the fork, and this app arrived on
+// a machine with no host compiler to check an edit to it with.
+
+#include <FreeInkUI.h>
+
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+
+#include "../../lib/GfxRenderer/PaintClock.h"
+#include "../../src/apps_local/clippy/ClippyFactsCore.h"
+#include "../../src/apps_local/clippy/ClippyFactsScreens.h"
+#include "../../src/apps_local/ui/ToyboxScreen.h"
+#include "../../src/apps_local/ui/ToyboxText.h"
+
+namespace fui = freeink::ui;
+
+namespace {
+
+int checks = 0;
+int failures = 0;
+
+#define CHECK(cond)                                                       \
+  do {                                                                    \
+    ++checks;                                                             \
+    if (!(cond)) {                                                        \
+      ++failures;                                                         \
+      std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);         \
+    }                                                                     \
+  } while (0)
+
+// Ten pixels a character and a 20px line, the same stand-in host-tests/ui uses.
+// Not the real faces: this suite is about geometry and routing, and a fake with
+// round numbers is one whose failures are readable.
+constexpr int16_t kCharWidth = 10;
+constexpr int16_t kLineHeight = 20;
+
+struct DrawnText {
+  fui::Rect rect;
+  std::string text;
+  fui::TextStyle style;
+};
+
+struct DrawnBitmap {
+  fui::Rect rect;
+  fui::BitmapRef bitmap;
+  fui::BitmapMode mode;
+};
+
+class FakeTarget final : public fui::DrawTarget {
+ public:
+  fui::Size measureText(const fui::FontId, const char* text, const fui::TextStyle) const override {
+    const int length = text == nullptr ? 0 : static_cast<int>(std::strlen(text));
+    return fui::Size{static_cast<int16_t>(length * kCharWidth), kLineHeight};
+  }
+  int16_t lineHeight(const fui::FontId) const override { return kLineHeight; }
+  void fill(const fui::Rect rect, const fui::Paint, const uint8_t = 0, const uint8_t = 0) override {
+    fills.push_back(rect);
+  }
+  void stroke(const fui::Rect rect, const fui::Paint, const uint8_t, const uint8_t = 0,
+              const uint8_t = 0) override {
+    fills.push_back(rect);
+  }
+  void line(const fui::Point, const fui::Point, const uint8_t, const fui::Paint) override {}
+  void triangle(const fui::Point, const fui::Point, const fui::Point, const fui::Paint) override {}
+  void text(const fui::Rect rect, const char* text, const fui::TextStyle style) override {
+    texts.push_back(DrawnText{rect, text == nullptr ? std::string() : std::string(text), style});
+  }
+  void bitmap(const fui::Rect rect, const fui::BitmapRef bitmap, const fui::BitmapMode mode,
+              const fui::Paint = fui::Paint::solid(fui::Color::Black),
+              const fui::Rotation = fui::Rotation::None) override {
+    bitmaps.push_back(DrawnBitmap{rect, bitmap, mode});
+  }
+
+  std::vector<DrawnText> texts;
+  std::vector<fui::Rect> fills;
+  std::vector<DrawnBitmap> bitmaps;
+};
+
+// The X4 Pro's app surface: 480x800 portrait, which is what every number in
+// ToyboxMetrics.h is an absolute row of.
+fui::DeviceContext device() {
+  fui::DeviceContext context;
+  context.width = 480;
+  context.height = 800;
+  context.hasTouch = true;
+  return context;
+}
+
+// One rendered screen, plus a finger.
+struct Rendered {
+  FakeTarget target;
+  toybox::Interactions interactions;
+
+  void build(const char* fact) {
+    const fui::DeviceContext context = device();
+    const fui::InputSnapshot noInput{};
+    toybox::Frame frame(target, context, noInput, interactions);
+    // The one-argument constructor, which is the shared palette. Handing
+    // themeTokens() over explicitly would not compile and should not: Screen
+    // holds the theme by reference and deletes the rvalue overload.
+    toybox::Screen screen(frame);
+    clippyui::Model model;
+    model.fact = fact;
+    clippyui::buildFacts(screen, model);
+    // A tap is never routed against a table the panel has not shown yet, so a
+    // test that never paints can never route. This is that paint.
+    paintclock::notePainted();
+  }
+
+  fui::ActionEvent tap(const int x, const int y) {
+    fui::InputSnapshot input;
+    input.touchReleased = true;
+    input.touchX = static_cast<int16_t>(x);
+    input.touchY = static_cast<int16_t>(y);
+    return interactions.route(input);
+  }
+
+  bool drew(const char* needle) const {
+    for (const DrawnText& drawn : texts()) {
+      if (drawn.text == needle) return true;
+    }
+    return false;
+  }
+
+  const std::vector<DrawnText>& texts() const { return target.texts; }
+};
+
+bool sameRect(const fui::Rect& a, const fui::Rect& b) {
+  return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height;
+}
+
+bool insidePanel(const fui::Rect& rect) {
+  return rect.x >= 0 && rect.y >= 0 && rect.right() <= 480 && rect.bottom() <= 800;
+}
+
+// ---------------------------------------------------------------------------
+
+void testFactsAreAFactTable() {
+  CHECK(clippy::factCount() >= 5);
+  for (int i = 0; i < clippy::factCount(); ++i) {
+    const char* fact = clippy::kFacts[i];
+    CHECK(fact != nullptr && fact[0] != '\0');
+    // Sentences, not labels: something that ends without a full stop is a title
+    // and would want the header band, not the body.
+    const size_t length = std::strlen(fact);
+    CHECK(length > 8 && fact[length - 1] == '.');
+  }
+  CHECK(std::strcmp(clippy::factText(-1), clippy::kFacts[0]) == 0);
+  CHECK(std::strcmp(clippy::factText(clippy::factCount()), clippy::kFacts[0]) == 0);
+}
+
+void testNextFactNeverRepeats() {
+  const int count = clippy::factCount();
+  for (int current = 0; current < count; ++current) {
+    std::vector<bool> seen(static_cast<size_t>(count), false);
+    for (uint32_t roll = 0; roll < 512; ++roll) {
+      const int next = clippy::nextFact(current, roll);
+      CHECK(next >= 0 && next < count);
+      CHECK(next != current);
+      seen[static_cast<size_t>(next)] = true;
+    }
+    // Every other fact is reachable from here: a no-repeat rule that only ever
+    // steps to the neighbour would pass the check above and turn eight facts
+    // into a fixed cycle.
+    for (int other = 0; other < count; ++other) {
+      CHECK(seen[static_cast<size_t>(other)] == (other != current));
+    }
+  }
+  // Opening the app. Any fact will do, including the first.
+  for (uint32_t roll = 0; roll < 64; ++roll) {
+    const int first = clippy::nextFact(-1, roll);
+    CHECK(first >= 0 && first < count);
+  }
+}
+
+void testLayoutFitsThePanelUnderTheChrome() {
+  const clippyui::Layout box = clippyui::layout(device());
+
+  CHECK(box.clippy.width == clippyui::kArtSize);
+  CHECK(box.clippy.height == clippyui::kArtSize);
+  // Centred on the panel, and clear of the header band, its gap and its rule.
+  CHECK(box.clippy.x == (480 - clippyui::kArtSize) / 2);
+  CHECK(box.clippy.y >= toybox::kChromeHeight);
+  CHECK(box.clippy.y == toybox::kBodyTop);
+
+  // Reading order, with nothing overlapping anything.
+  CHECK(box.caption.y >= box.clippy.bottom());
+  CHECK(box.rule.y >= box.caption.bottom());
+  CHECK(box.fact.y >= box.rule.bottom());
+  CHECK(box.fact.height >= kLineHeight * 3);
+
+  CHECK(insidePanel(box.clippy));
+  CHECK(insidePanel(box.caption));
+  CHECK(insidePanel(box.rule));
+  CHECK(insidePanel(box.fact));
+  // The body's own margin, on both sides and at the foot.
+  CHECK(box.fact.x == toybox::kMargin);
+  CHECK(box.fact.right() == 480 - toybox::kMargin);
+  CHECK(box.fact.bottom() <= 800 - toybox::kMargin);
+}
+
+void testClippyIsDrawnWhereHeIsTapped() {
+  Rendered out;
+  out.build(clippy::kFacts[0]);
+  const clippyui::Layout box = clippyui::layout(device());
+
+  // Drawn: one bitmap, at native size, in the mode that does not resample.
+  CHECK(out.target.bitmaps.size() == 1);
+  if (!out.target.bitmaps.empty()) {
+    const DrawnBitmap& art = out.target.bitmaps.front();
+    CHECK(sameRect(art.rect, box.clippy));
+    CHECK(art.mode == fui::BitmapMode::Center);
+    CHECK(art.bitmap.width == clippyui::kArtSize);
+    CHECK(art.bitmap.height == clippyui::kArtSize);
+    CHECK(art.bitmap.format == fui::BitmapFormat::Mask1);
+  }
+
+  // Tapped: exactly one slot, the same rect, and no second control anywhere.
+  int nextFactSlots = 0;
+  for (size_t i = 0; i < out.interactions.count(); ++i) {
+    const fui::Interaction& slot = out.interactions.data()[i];
+    if (slot.action != clippyui::ActionNextFact) continue;
+    ++nextFactSlots;
+    CHECK(sameRect(slot.rect, box.clippy));
+  }
+  CHECK(nextFactSlots == 1);
+
+  // And behaviourally, which is the assertion that would survive a rewrite of
+  // everything above it.
+  CHECK(out.tap(240, box.clippy.y + clippyui::kArtSize / 2).action == clippyui::ActionNextFact);
+  CHECK(out.tap(box.clippy.x + 2, box.clippy.y + 2).action == clippyui::ActionNextFact);
+  CHECK(out.tap(box.clippy.right() - 2, box.clippy.bottom() - 2).action == clippyui::ActionNextFact);
+
+  // Off Clippy is off. Above him is the body gutter, below him is his caption,
+  // and beside him is the margin: none of the three is a control.
+  CHECK(out.tap(240, box.clippy.y - 4).action == fui::NO_ACTION);
+  CHECK(out.tap(240, box.caption.y + 4).action == fui::NO_ACTION);
+  CHECK(out.tap(box.clippy.x - 8, box.clippy.y + 40).action == fui::NO_ACTION);
+  CHECK(out.tap(240, box.fact.y + 4).action == fui::NO_ACTION);
+}
+
+void testTheScreenSaysWhatItIsAndWhatToDo() {
+  Rendered out;
+  out.build(clippy::kFacts[3]);
+
+  // The shared chrome, in the shared band. Drawn by toybox::headerBand rather
+  // than by this app, which is the point of the assertion.
+  CHECK(out.drew("CLIPPY FACTS"));
+  CHECK(out.drew("Tap Clippy for another fact"));
+  // The fact itself, whole: no ellipsis, and no silent truncation to the box.
+  CHECK(out.drew(clippy::kFacts[3]));
+
+  const clippyui::Layout box = clippyui::layout(device());
+  bool foundFact = false;
+  for (const DrawnText& drawn : out.texts()) {
+    CHECK(insidePanel(drawn.rect));
+    CHECK(drawn.text.find("\xE2\x80\xA6") == std::string::npos);
+    if (drawn.text != clippy::kFacts[3]) continue;
+    foundFact = true;
+    CHECK(sameRect(drawn.rect, box.fact));
+    // maxLines derived from the box rather than left at its default of ONE,
+    // which is what truncates a wrapped sentence with a glyph Jersey lacks.
+    CHECK(drawn.style.maxLines > 1);
+    CHECK(drawn.style.align == fui::TextAlign::Center);
+    CHECK(drawn.style.color == fui::Color::Black);
+  }
+  CHECK(foundFact);
+
+  for (const fui::Rect& rect : out.target.fills) CHECK(insidePanel(rect));
+}
+
+// Every fact, at the real box width, through the fork's own fitting rule: if
+// fitLines gives back anything other than the whole sentence then that sentence
+// does not fit and something would be dropped on the panel.
+void testEveryFactFitsItsBox() {
+  const FakeTarget target;
+  const clippyui::Layout box = clippyui::layout(device());
+  const int lines = box.fact.height / kLineHeight;
+  CHECK(lines >= 3);
+  fui::TextStyle style;
+  style.font = toybox::kBodyFont;
+  style.align = fui::TextAlign::Center;
+  for (int i = 0; i < clippy::factCount(); ++i) {
+    CHECK(toybox::fitLines(target, clippy::kFacts[i], box.fact.width, lines, style) == clippy::kFacts[i]);
+  }
+}
+
+}  // namespace
+
+int main() {
+  testFactsAreAFactTable();
+  testNextFactNeverRepeats();
+  testLayoutFitsThePanelUnderTheChrome();
+  testClippyIsDrawnWhereHeIsTapped();
+  testTheScreenSaysWhatItIsAndWhatToDo();
+  testEveryFactFitsItsBox();
+
+  // The tree's summary wording, not a nicer one of this suite's own:
+  // check.sh counts sub-suites with `grep -c "checks, 0 failed"`, so a suite
+  // that words its tally differently runs, passes, and is left out of the
+  // "ok (N sub-suite(s))" line -- which is how a suite nobody notices is
+  // missing looks exactly like one that was never added.
+  std::printf("clippy: %d checks, %d failed\n", checks, failures);
+  return failures == 0 ? 0 : 1;
+}

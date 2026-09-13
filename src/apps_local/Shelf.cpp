@@ -16,6 +16,8 @@
 #include "battleship/BattleshipActivity.h"
 #include "checkers/CheckersActivity.h"
 #include "chess/ChessActivity.h"
+#include "clippy/ClippyArt.h"
+#include "clippy/ClippyFactsActivity.h"
 #include "connectfour/ConnectFourActivity.h"
 #include "connections/ConnectionsActivity.h"
 #include "dungeon/DungeonActivity.h"
@@ -79,6 +81,11 @@ constexpr shelf::Item kApps[] = {
     {"INSTAPAPER", &icon_instapaper_32, &InstapaperActivity::create},
     {"WALLPAPERS", &icon_wallpapers_32, &WallpapersActivity::create},
     {"WIKIPEDIA", &icon_wikipedia_32, &WikipediaActivity::create},
+    // The one mark on either shelf that is not Lucide's: Lucide's `paperclip` is
+    // a diagonal clip with nowhere to put a face, and a Clippy with no eyes is
+    // not Clippy. Drawn in assets_local/clippy/, generated into
+    // clippy/ClippyArt.h at the same 32px every row above uses.
+    {"CLIPPY FACTS", &icon_clippy_32, &ClippyFactsActivity::create},
 };
 
 // The two rows Home grows, in reading order. Titles are Title Case because

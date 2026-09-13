@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Clippy Facts' one drawing: a bent paperclip with eyes.
+
+     Drawn rather than downloaded, and deliberately crude. It is the placeholder
+     in the sense that the shapes are mine and a better hand should replace them
+     -- edit this file, regenerate, and nothing else in the app changes.
+
+     Four constraints shape it, all four from the pipeline rather than from taste.
+
+     1. SQUARE VIEWBOX. gen_icons.py rasterises with `rsvg-convert -w px -h px`,
+        one number for both axes, so a non-square drawing comes out stretched.
+        The figure is composed inside 192x192 and its proportions live in the
+        geometry, not in the box.
+
+     2. STROKES, NOT FILLS, AND NO GREY ANYWHERE. The output is one bit. A
+        12-unit stroke here is 15px in the 240px cut and 2px in the 32px shelf
+        cut; anything below about 8 units survives the app's own size and
+        disappears from the shelf row.
+
+     3. THE WIRE PASSES BEHIND THE EYES, and on a 1-bit panel that has to be
+        drawn rather than implied: where the clip's black stroke meets an eye's
+        black outline the two merge into a blob, and the first version of this
+        file had a solid bar across both eyes for exactly that reason. So each
+        eye is three circles in document order -- a white HALO that erases the
+        wire around it, the eye itself, then the pupil. Painting order is
+        document order, and both halos come before both outlines so that one
+        eye's halo cannot bite the other eye's rim.
+
+     4. Every attribute sits on its own element. The stdlib-only fallback
+        rasteriser (tools_local/clippy/rasterize_clippy.py, for a machine with no
+        librsvg) reads this file with a regex and inherits nothing from a group.
+        If you restructure this into a <g stroke="#000"> the way Lucide does,
+        regenerate with tools_local/clippy/gen_clippy_art.sh instead. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <!-- The clip: two nested loops, the bent wire seen flat. The top of the outer
+       loop is drawn in full and then hidden by the eyes' halos, which is why the
+       arms appear to run up behind Clippy's face. -->
+  <rect x="54" y="70" width="88" height="110" rx="36" ry="36" fill="none" stroke="#000000" stroke-width="12"/>
+  <rect x="78" y="96" width="40" height="52" rx="18" ry="18" fill="none" stroke="#000000" stroke-width="12"/>
+
+  <!-- The halos. White, unstroked, wider than the eye they clear a space for. -->
+  <circle cx="70" cy="56" r="29" fill="#FFFFFF" stroke="none"/>
+  <circle cx="122" cy="56" r="29" fill="#FFFFFF" stroke="none"/>
+
+  <!-- The eyes, and pupils turned in towards each other, because two pupils
+       staring straight out of the panel read as a warning icon. -->
+  <circle cx="70" cy="56" r="20" fill="#FFFFFF" stroke="#000000" stroke-width="9"/>
+  <circle cx="122" cy="56" r="20" fill="#FFFFFF" stroke="#000000" stroke-width="9"/>
+  <circle cx="76" cy="60" r="8" fill="#000000" stroke="none"/>
+  <circle cx="116" cy="60" r="8" fill="#000000" stroke="none"/>
+
+  <!-- The brows, last, so nothing erases them. Asymmetric on purpose: level
+       brows read as a machine. -->
+  <line x1="44" y1="20" x2="78" y2="12" fill="none" stroke="#000000" stroke-width="8" stroke-linecap="round"/>
+  <line x1="114" y1="10" x2="148" y2="20" fill="none" stroke="#000000" stroke-width="8" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,18 @@
+# Clippy Facts' own artwork, generated into src/apps_local/clippy/ClippyArt.h by
+# tools_local/clippy/gen_clippy_art.sh. Format: alias = svg basename, resolved
+# against assets_local/clippy/.
+#
+# One drawing, at two cuts, and the two cuts are two different jobs:
+#
+#   240  the app's own surface, and the touch target. Drawn at native size with
+#        BitmapMode::Center, never scaled -- Contain/Cover/Stretch resample a
+#        1-bit mask with nearest-neighbour drawPixel, which on a 1px eyebrow
+#        means the eyebrow is there or gone depending on the ratio.
+#    32  the shelf row, beside the twenty-eight icons Lucide draws. Same size
+#        those are, because a row whose mark is a different size reads as a
+#        different kind of row.
+#
+# Lucide has `paperclip`, and it is the wrong paperclip: a diagonal clip with no
+# room for a face. The design language's rule is to draw our own only where no
+# good licensed option exists, and a Clippy with no eyes is not Clippy.
+clippy = clippy
