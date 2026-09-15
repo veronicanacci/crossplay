@@ -1,7 +1,12 @@
 #include "ClippyFactsActivity.h"
 
+#include <HalStorage.h>
+#include <Logging.h>
 #include <Memory.h>
 
+#include <cstdio>
+
+#include "../../components/UITheme.h"
 #include "../Shelf.h"
 #include "../ui/ToyboxFonts.h"
 #include "../ui/ToyboxSeed.h"
@@ -9,20 +14,82 @@
 #include "ClippyFactsCore.h"
 #include "ClippyFactsScreens.h"
 
+namespace {
+
+// The open handle, alive for as long as the activity is: a fact is one seek and
+// one short read, and reopening the file per tap would cost more than the read.
+// File-scope, the way Connections keeps its pack, because HalFile is not
+// something the freestanding header should know the name of.
+HalFile gCard;
+
+bool readCard(void* ctx, const uint32_t offset, void* dst, const uint32_t len) {
+  auto* file = static_cast<HalFile*>(ctx);
+  if (!file->seek(offset)) return false;
+  return file->read(dst, len) == static_cast<int>(len);
+}
+
+}  // namespace
+
 std::unique_ptr<Activity> ClippyFactsActivity::create(GfxRenderer& renderer, MappedInputManager& mappedInput) {
   // Never a bare new: the firmware is built -fno-exceptions, so a failed
   // allocation aborts rather than throwing.
   return makeUniqueNoThrow<ClippyFactsActivity>(renderer, mappedInput);
 }
 
+void ClippyFactsActivity::openCard() {
+  fromCard = false;
+  gCard = HalFile{};
+  // Three ways to end up on the built-in table, each logged in its own words,
+  // because "no file", "file would not open" and "file has nothing in it" want
+  // three different things done about them.
+  if (!Storage.exists(clippy::kFactsPath)) {
+    LOG_INF("CLIP", "No %s; %d built-in facts", clippy::kFactsPath, clippy::builtinCount());
+  } else if (!Storage.openFileForRead("CLIP", clippy::kFactsPath, gCard)) {
+    LOG_ERR("CLIP", "%s exists but would not open", clippy::kFactsPath);
+  } else if (!facts.open(readCard, &gCard, static_cast<uint32_t>(gCard.fileSize()))) {
+    LOG_ERR("CLIP", "%s has no usable facts (%d lines skipped)", clippy::kFactsPath, facts.skipped());
+    gCard = HalFile{};
+  } else {
+    fromCard = true;
+    LOG_INF("CLIP", "%d facts from %s, %d lines skipped", facts.count(), clippy::kFactsPath, facts.skipped());
+  }
+  // Under forty characters either way: the footer is one line of the caption's
+  // cut, which holds about that many, and an overflowing footer is truncated
+  // with a glyph the face does not carry.
+  if (fromCard) {
+    std::snprintf(footer, sizeof(footer), "%d facts from %s", facts.count(), clippy::kFactsPath);
+  } else {
+    std::snprintf(footer, sizeof(footer), "No %s on the card", clippy::kFactsPath);
+  }
+}
+
+int ClippyFactsActivity::factCount() const { return fromCard ? facts.count() : clippy::builtinCount(); }
+
+void ClippyFactsActivity::loadFact() {
+  if (fromCard && facts.factAt(fact, text, static_cast<int>(sizeof(text)))) return;
+  // Built in, or a card read that failed mid-session -- the card pulled, a bad
+  // sector. The table answers rather than a blank panel, and the index is folded
+  // onto it so a card fact number still lands on a real row.
+  const int index = fromCard ? fact % clippy::builtinCount() : fact;
+  std::snprintf(text, sizeof(text), "%s", clippy::builtinText(index));
+}
+
 void ClippyFactsActivity::onEnter() {
   Activity::onEnter();
   toybox::ensureFonts(renderer);
-  // Opening on a roll rather than on kFacts[0]: an app that always says the same
-  // thing first looks like an app with one fact in it. toybox::seed() rather than
-  // millis() by hand, so CROSSPLAY_SEED can pin this for a screenshot.
-  fact = clippy::nextFact(fact, toybox::seed());
+  openCard();
+  // Opening on a roll rather than on the first fact: an app that always says the
+  // same thing first looks like an app with one fact in it. toybox::seed() rather
+  // than millis() by hand, so CROSSPLAY_SEED can pin this for a screenshot.
+  fact = clippy::nextFact(-1, toybox::seed(), factCount());
+  loadFact();
   requestUpdate();
+}
+
+void ClippyFactsActivity::onExit() {
+  gCard = HalFile{};
+  fromCard = false;
+  Activity::onExit();
 }
 
 void ClippyFactsActivity::loop() {
@@ -50,7 +117,8 @@ void ClippyFactsActivity::loop() {
   // refresh that replaced it.
   if (interactions.route(input).action != clippyui::ActionNextFact) return;
 
-  fact = clippy::nextFact(fact, toybox::seed());
+  fact = clippy::nextFact(fact, toybox::seed(), factCount());
+  loadFact();
   requestUpdate();
 }
 
@@ -73,7 +141,8 @@ void ClippyFactsActivity::render(RenderLock&&) {
   toybox::Screen surface(frame);
 
   clippyui::Model model;
-  model.fact = clippy::factText(fact);
+  model.fact = text;
+  model.source = footer;
   clippyui::buildFacts(surface, model);
   interactionsReady = true;
 

@@ -27,6 +27,7 @@ ICONS=../../freeink-sdk/libs/assets/Icons
 "${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -Wno-comment \
   -I"$SDK/include" -I"$ICONS/include" \
   "$SDK/src/FreeInkUI.cpp" \
+  ../../src/apps_local/clippy/ClippyFactsCore.cpp \
   ../../src/apps_local/clippy/ClippyFactsScreens.cpp \
   test_clippy.cpp -o "$BUILD_DIR/test_clippy"
 "$BUILD_DIR/test_clippy"

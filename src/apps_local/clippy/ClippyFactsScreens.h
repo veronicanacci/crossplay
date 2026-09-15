@@ -14,11 +14,15 @@ namespace clippyui {
 
 namespace fui = freeink::ui;
 
-// Everything one paint needs. One field, and it stays one field: the scope says
-// no poses, no expressions and no state that Clippy reacts to, so there is
-// nothing else a paint could depend on.
+// Everything one paint needs. Two fields: the scope says no poses, no
+// expressions and no state that Clippy reacts to, so the second one is not
+// about Clippy. It is about the card: where the facts came from, in one short
+// line, because a fact source that cannot be seen cannot be debugged on a device
+// with no console -- a card with the file in the wrong folder would look exactly
+// like an app that ignores the card.
 struct Model {
   const char* fact = nullptr;
+  const char* source = nullptr;  // nullptr draws no footer
 };
 
 // The only thing on this screen you can tap.
@@ -44,6 +48,7 @@ struct Layout {
   fui::Rect caption;  // "Tap Clippy for another fact"
   fui::Rect rule;     // the hairline between chrome and content
   fui::Rect fact;     // the sentence
+  fui::Rect footer;   // where the facts came from, one line at the foot
 };
 
 Layout layout(const fui::DeviceContext& device);

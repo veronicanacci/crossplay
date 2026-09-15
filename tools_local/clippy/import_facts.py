@@ -81,8 +81,10 @@ def to_ascii(text):
 def clean(line):
     line = to_ascii(line)
     line = re.sub(r"\s+", " ", line).strip()
-    # " ." and " ," left behind by a stray space before punctuation.
-    line = re.sub(r"\s+([.,;:!?])", r"\1", line)
+    # " ." and " ," left behind by a stray space before punctuation. Only when
+    # the mark ends a clause: "take .13 seconds" is a decimal with no leading
+    # zero, and closing that gap would print "take.13".
+    line = re.sub(r"\s+([.,;:!?])(?=\s|$)", r"\1", line)
     if line and (line[-1].isalnum() or line[-1] in ")\"'"):
         line += "."
     return line

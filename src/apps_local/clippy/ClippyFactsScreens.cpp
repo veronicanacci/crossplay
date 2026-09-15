@@ -19,6 +19,10 @@ constexpr int16_t kBreak = toybox::kGutter * 2;
 // readingChromeFaces() binds to Jersey 14 for exactly this.
 constexpr int16_t kCaptionHeight = 36;
 
+// One line of the same cut, tighter: the footer is a status, not an instruction,
+// and gets the room a status gets.
+constexpr int16_t kFooterHeight = 28;
+
 fui::TextStyle textStyle(const fui::FontId font, const fui::TextAlign align) {
   fui::TextStyle style;
   // Named even when it is the slot the component would default to: a style whose
@@ -85,7 +89,11 @@ Layout layout(const fui::DeviceContext& device) {
   out.caption = fui::makeRect(left, static_cast<int16_t>(out.clippy.bottom() + kJoin), width, kCaptionHeight);
   out.rule = fui::makeRect(left, static_cast<int16_t>(out.caption.bottom() + kBreak), width, toybox::kHairline);
   const int16_t factTop = static_cast<int16_t>(out.rule.bottom() + kBreak);
-  out.fact = fui::makeRect(left, factTop, width, static_cast<int16_t>(bottom - factTop));
+  // The footer sits on the margin and the fact takes everything between the
+  // rule and it, so a longer footer cut would shrink the fact rather than
+  // overlap it.
+  out.footer = fui::makeRect(left, static_cast<int16_t>(bottom - kFooterHeight), width, kFooterHeight);
+  out.fact = fui::makeRect(left, factTop, width, static_cast<int16_t>(out.footer.y - kJoin - factTop));
   return out;
 }
 
@@ -111,6 +119,9 @@ void buildFacts(toybox::Screen& screen, const Model& model) {
   // The reading cut, centred: one sentence under a centred picture reads as a
   // caption to it when it is centred and as the start of a page when it is not.
   drawProse(screen, box.fact, model.fact, toybox::kBodyFont, fui::TextAlign::Center);
+  // The device speaking again, so the caption's cut: "312 facts from
+  // /clippy/facts.txt" is about the card, not about Clippy.
+  drawProse(screen, box.footer, model.source, toybox::kSmallFont, fui::TextAlign::Center);
 }
 
 }  // namespace clippyui
