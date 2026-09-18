@@ -104,10 +104,8 @@ struct Store {
 
 // ---- paging -----------------------------------------------------------------
 
-// How many pages `count` rows need at `perPage`, never fewer than one.
-int pageCountFor(int count, int perPage);
-// The page holding row `index`.
-int pageFor(int index, int perPage);
+// Which rows make a page is decided where the rows are measured (see
+// TodoScreens.h pageStarts); this is only the step between pages.
 // `page` moved by `delta`, stopping at both ends. Stopping rather than wrapping:
 // every page draws its rows in the same places, so a wrap arrived at by
 // accident looks exactly like the page that was wanted, and the next tap opens

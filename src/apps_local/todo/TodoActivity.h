@@ -50,10 +50,14 @@ class TodoActivity final : public Activity {
   int openList = -1;
   int listsPage = 0;
   int itemsPage = 0;
-  // Measured by render() from the same layout the screens draw, and read by
-  // loop() to page. Both start at one page of one row until the first paint.
-  int rowsOnPage = 1;
+  // Counted by render(), which is the only place that can: rows are as tall as
+  // their wrapped text, so how many fit a page is known once they are measured.
+  // loop() reads it to page. One page until the first paint.
   int pageCount = 1;
+  // A row render() should bring into view: the store index of a list just
+  // made, or the index of an item just added, either of which may land below
+  // the fold. -1 when nothing is owed.
+  int reveal = -1;
 
   todo::Store store;
   OptionPopup menu;

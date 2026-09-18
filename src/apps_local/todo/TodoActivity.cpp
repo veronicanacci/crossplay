@@ -5,6 +5,7 @@
 #include <Memory.h>
 
 #include <variant>
+#include <vector>
 
 #include "../../activities/util/KeyboardEntryActivity.h"
 #include "../../components/UITheme.h"
@@ -127,11 +128,8 @@ void TodoActivity::handle(const freeink::ui::ActionEvent& event) {
         if (added < 0) return;
         save();
         // Land on the page the new list is on: it joins the end of the
-        // unfinished lists, which may be below the fold.
-        const std::vector<int> order = todo::displayOrder(store.lists);
-        for (size_t i = 0; i < order.size(); ++i) {
-          if (order[i] == added) listsPage = todo::pageFor(static_cast<int>(i), rowsOnPage);
-        }
+        // unfinished lists, which may be below the fold. render() knows where.
+        reveal = added;
       });
       return;
 
@@ -147,7 +145,7 @@ void TodoActivity::handle(const freeink::ui::ActionEvent& event) {
         const int added = store.addItem(openList, text);
         if (added < 0) return;
         save();
-        itemsPage = todo::pageFor(added, rowsOnPage);
+        reveal = added;
       });
       return;
 
@@ -231,15 +229,34 @@ void TodoActivity::render(RenderLock&&) {
     openList = -1;
   }
 
+  // Rows are as tall as their wrapped text, so the pages are found by measuring
+  // every row with the same function the builder will draw it with, and
+  // filling pages greedily. The builder never sees a row that does not fit.
+  const fui::ThemeTokens& tokens = toybox::themeTokens();
+  std::vector<int16_t> heights;
+
   if (view == View::Lists) {
     const todoui::Layout box = todoui::layout(device, false);
-    rowsOnPage = todoui::rowsPerPage(box.rows, todoui::kListRowHeight);
     const std::vector<int> order = todo::displayOrder(store.lists);
     const int count = static_cast<int>(order.size());
-    pageCount = todo::pageCountFor(count, rowsOnPage);
+    heights.reserve(order.size());
+    for (const int index : order) {
+      const todo::List& list = store.lists[index];
+      heights.push_back(todoui::rowHeightFor(target, tokens, list.name.c_str(),
+                                             todoui::nameWidth(box.rows, list.pinned), todoui::kNameLines, true));
+    }
+    const std::vector<int> starts = todoui::pageStarts(box.rows, heights.data(), count);
+    pageCount = static_cast<int>(starts.size());
+    if (reveal >= 0) {
+      for (int i = 0; i < count; ++i) {
+        if (order[i] == reveal) listsPage = todoui::pageOf(starts, i);
+      }
+      reveal = -1;
+    }
     listsPage = todo::pageStep(listsPage, pageCount, 0);
-    const int first = listsPage * rowsOnPage;
-    const int onPage = count - first < rowsOnPage ? count - first : rowsOnPage;
+    const int first = starts[listsPage];
+    const int last = listsPage + 1 < pageCount ? starts[listsPage + 1] : count;
+    const int onPage = last - first > todoui::kMaxRowsOnPage ? todoui::kMaxRowsOnPage : last - first;
 
     todoui::ListRow rows[todoui::kMaxRowsOnPage];
     for (int i = 0; i < onPage; ++i) {
@@ -261,12 +278,22 @@ void TodoActivity::render(RenderLock&&) {
   } else {
     const todo::List& list = store.lists[openList];
     const todoui::Layout box = todoui::layout(device, true);
-    rowsOnPage = todoui::rowsPerPage(box.rows, todoui::kItemRowHeight);
     const int count = static_cast<int>(list.items.size());
-    pageCount = todo::pageCountFor(count, rowsOnPage);
+    heights.reserve(list.items.size());
+    const int16_t width = todoui::itemWidth(box.rows);
+    for (const todo::Item& item : list.items) {
+      heights.push_back(todoui::rowHeightFor(target, tokens, item.text.c_str(), width, todoui::kItemLines, false));
+    }
+    const std::vector<int> starts = todoui::pageStarts(box.rows, heights.data(), count);
+    pageCount = static_cast<int>(starts.size());
+    if (reveal >= 0) {
+      itemsPage = todoui::pageOf(starts, reveal);
+      reveal = -1;
+    }
     itemsPage = todo::pageStep(itemsPage, pageCount, 0);
-    const int first = itemsPage * rowsOnPage;
-    const int onPage = count - first < rowsOnPage ? count - first : rowsOnPage;
+    const int first = starts[itemsPage];
+    const int last = itemsPage + 1 < pageCount ? starts[itemsPage + 1] : count;
+    const int onPage = last - first > todoui::kMaxRowsOnPage ? todoui::kMaxRowsOnPage : last - first;
 
     size_t n = 0;
     for (const char* c = list.name.c_str(); *c != '\0' && n + 1 < sizeof(shoutedTitle); ++c, ++n) {

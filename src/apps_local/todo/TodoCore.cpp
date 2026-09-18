@@ -108,16 +108,6 @@ bool Store::toggleItem(const int list, const int item) {
   return true;
 }
 
-int pageCountFor(const int count, const int perPage) {
-  if (perPage <= 0 || count <= 0) return 1;
-  return (count + perPage - 1) / perPage;
-}
-
-int pageFor(const int index, const int perPage) {
-  if (perPage <= 0 || index <= 0) return 0;
-  return index / perPage;
-}
-
 int pageStep(const int page, const int pageCount, const int delta) {
   if (pageCount <= 1) return 0;
   const int from = page < 0 ? 0 : (page >= pageCount ? pageCount - 1 : page);

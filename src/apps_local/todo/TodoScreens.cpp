@@ -41,9 +41,14 @@ constexpr int16_t kPinSize = 24;
 // rather than the list's content.
 constexpr int16_t kStatusHeight = toybox::kButtonCut.lineHeight;
 
-// Where the list component starts a row's text: its own side padding, the box
-// and a gutter, the same arrangement the shelf chooser's rows have.
+// Where a row's text starts: the row's side padding, the box and a gutter,
+// the same arrangement the shelf chooser's rows have.
 constexpr int16_t kTextInset = toybox::kGutter + kBoxSize + toybox::kGutter;
+
+// Air above and below a row's text. Small, because a single-line row is
+// already held open to the theme's row height; this is what a wrapped row
+// adds around its lines.
+constexpr int16_t kRowPad = 4;
 
 fui::StyleSet invisible() {
   // A hit region and nothing else. A StyleSet left unset would be replaced by
@@ -51,6 +56,46 @@ fui::StyleSet invisible() {
   fui::StyleSet styles;
   styles.explicitlySet = true;
   return styles;
+}
+
+// The face a row's text is set in: the theme's body text, which under the
+// activity's faces is the reading cut. Named in one place because the height
+// of a row is measured in it and the row is drawn in it.
+fui::TextStyle labelStyle(const fui::ThemeTokens& tokens, const int maxLines) {
+  fui::TextStyle style = tokens.bodyText;
+  style.color = fui::Color::Black;
+  style.align = fui::TextAlign::Left;
+  style.maxLines = static_cast<uint8_t>(maxLines);
+  return style;
+}
+
+// The detail line under a list's name, in the device's voice.
+fui::TextStyle detailStyle(const fui::ThemeTokens& tokens) {
+  fui::TextStyle style = toybox::buttonText(tokens);
+  style.align = fui::TextAlign::Left;
+  return style;
+}
+
+// The text as it will be drawn, and how many lines that takes. fitLines()
+// wraps the way the renderer wraps and cuts with an ellipsis only when the
+// lines run out; measureWrappedText() then counts the lines the result really
+// uses, so a name that fits on one line costs one.
+struct FittedText {
+  std::string text;
+  int lines = 1;
+};
+
+FittedText fit(const fui::DrawTarget& target, const char* text, const int16_t width, const fui::TextStyle& style) {
+  FittedText out;
+  out.text = toybox::fitLines(target, text, width, style.maxLines, style);
+  const int16_t lineHeight = target.lineHeight(style.font);
+  if (lineHeight > 0 && !out.text.empty()) {
+    const fui::Size wrapped = fui::measureWrappedText(target, out.text.c_str(), style, width);
+    out.lines = wrapped.height / lineHeight;
+  }
+  if (out.lines < 1) out.lines = 1;
+  if (out.lines > style.maxLines) out.lines = style.maxLines;
+  return out;
 }
 
 // The header band, with the page counter at its right when there is more than
@@ -83,16 +128,6 @@ void chrome(toybox::Screen& screen, const char* title, const int page, const int
   }
 }
 
-// The content rect becomes exactly the rows band, so the list component lays
-// its rows where layout() says they are. One rect, two readers.
-void contentToRows(toybox::Screen& screen, const Layout& box) {
-  const fui::Rect body = screen.body();
-  screen.insetContent(fui::Insets{static_cast<int16_t>(box.rows.y - body.y),
-                                  static_cast<int16_t>(body.right() - box.rows.right()),
-                                  static_cast<int16_t>(body.bottom() - box.rows.bottom()),
-                                  static_cast<int16_t>(box.rows.x - body.x)});
-}
-
 // The pill on the margin. Jersey for the label whatever the body slot carries,
 // because a button is the device speaking.
 void actionPill(toybox::Screen& screen, const Layout& box, const char* label, const fui::ActionId action) {
@@ -113,6 +148,35 @@ void emptyState(toybox::Screen& screen, const fui::Rect& rows, const char* words
   screen.target().text(
       fui::makeRect(rows.x, static_cast<int16_t>(rows.y + (rows.height - lineHeight) / 2), rows.width, lineHeight),
       words, style);
+}
+
+// A row's frame and its target: the theme's list row, a hairline around paper,
+// registered whole. The finger is already on the row, so the whole row
+// answers; a box under half a thumb would not.
+void rowFrame(toybox::Screen& screen, const fui::Rect& row, const fui::ActionId action, const int16_t value) {
+  screen.target().stroke(row, fui::Paint::solid(fui::Color::Black), toybox::kHairline);
+  screen.frame().hit(row, action, value);
+}
+
+// A row's text, and the detail under it when there is one, as a block centred
+// on the row. A single-line row is taller than its text and centres it; a
+// wrapped row is exactly its text plus padding and centres it just the same.
+void rowText(toybox::Screen& screen, const fui::Rect& row, const FittedText& fitted, const int16_t width,
+             const fui::TextStyle& label, const char* detail) {
+  const int16_t labelLh = screen.target().lineHeight(label.font);
+  const fui::TextStyle small = detailStyle(screen.theme());
+  const int16_t detailLh = detail != nullptr ? screen.target().lineHeight(small.font) : 0;
+  const int16_t blockH = static_cast<int16_t>(labelLh * fitted.lines + detailLh);
+  const int16_t left = static_cast<int16_t>(row.x + kTextInset);
+  const int16_t top = static_cast<int16_t>(row.y + (row.height - blockH) / 2);
+  fui::TextStyle style = label;
+  style.maxLines = static_cast<uint8_t>(fitted.lines);
+  screen.target().text(fui::makeRect(left, top, width, static_cast<int16_t>(labelLh * fitted.lines)),
+                       fitted.text.c_str(), style);
+  if (detail != nullptr) {
+    screen.target().text(
+        fui::makeRect(left, static_cast<int16_t>(top + labelLh * fitted.lines), width, detailLh), detail, small);
+  }
 }
 
 void mark(toybox::Screen& screen, const fui::Rect& row, const bool complete) {
@@ -165,14 +229,50 @@ Layout layout(const fui::DeviceContext& device, const bool withStatus) {
   return out;
 }
 
-int rowsPerPage(const fui::Rect& rows, const int16_t rowHeight) {
-  const int fit = fui::listVisibleRows(rows, rowHeight, kRowGap);
-  if (fit < 1) return 1;
-  return fit > kMaxRowsOnPage ? kMaxRowsOnPage : fit;
+int16_t nameWidth(const fui::Rect& rows, const bool pinned) {
+  // Measured against a row placed anywhere: only widths are used.
+  const fui::Rect row = fui::makeRect(rows.x, rows.y, rows.width, 1);
+  const int16_t right = static_cast<int16_t>((pinned ? pinRect(row).x : moreRect(row).x) - toybox::kGutter);
+  return static_cast<int16_t>(right - (row.x + kTextInset));
 }
 
-fui::Rect rowRect(const fui::Rect& rows, const int index, const int16_t rowHeight) {
-  return fui::makeRect(rows.x, static_cast<int16_t>(rows.y + index * (rowHeight + kRowGap)), rows.width, rowHeight);
+int16_t itemWidth(const fui::Rect& rows) { return static_cast<int16_t>(rows.width - kTextInset - toybox::kGutter); }
+
+int16_t rowHeightFor(const fui::DrawTarget& target, const fui::ThemeTokens& tokens, const char* text,
+                     const int16_t width, const int maxLines, const bool withDetail) {
+  const fui::TextStyle label = labelStyle(tokens, maxLines);
+  const FittedText fitted = fit(target, text, width, label);
+  const int16_t labelLh = target.lineHeight(label.font);
+  const int16_t detailLh = withDetail ? target.lineHeight(detailStyle(tokens).font) : 0;
+  const int16_t needed = static_cast<int16_t>(labelLh * fitted.lines + detailLh + kRowPad * 2);
+  return needed > tokens.rowHeight ? needed : tokens.rowHeight;
+}
+
+std::vector<int> pageStarts(const fui::Rect& rows, const int16_t* heights, const int count) {
+  std::vector<int> starts;
+  starts.push_back(0);
+  int used = 0;
+  for (int i = 0; i < count; ++i) {
+    const int next = used == 0 ? heights[i] : used + kRowGap + heights[i];
+    // A page holds what fits; a row that does not fit starts the next one,
+    // unless it is the first on its page, in which case it is drawn clipped
+    // rather than never.
+    if (next > rows.height && used != 0) {
+      starts.push_back(i);
+      used = heights[i];
+    } else {
+      used = next;
+    }
+  }
+  return starts;
+}
+
+int pageOf(const std::vector<int>& starts, const int index) {
+  int page = 0;
+  for (size_t p = 0; p < starts.size(); ++p) {
+    if (starts[p] <= index) page = static_cast<int>(p);
+  }
+  return page;
 }
 
 fui::Rect markRect(const fui::Rect& row) {
@@ -193,7 +293,6 @@ fui::Rect pinRect(const fui::Rect& row) {
 void buildLists(toybox::Screen& screen, const ListsModel& model) {
   chrome(screen, kTitle, model.page, model.pageCount);
   const Layout box = layout(screen.device(), false);
-  contentToRows(screen, box);
   actionPill(screen, box, kNewList, ActionNewList);
 
   if (model.count <= 0) {
@@ -201,52 +300,25 @@ void buildLists(toybox::Screen& screen, const ListsModel& model) {
     return;
   }
   const int count = model.count > kMaxRowsOnPage ? kMaxRowsOnPage : model.count;
+  const fui::TextStyle label = labelStyle(screen.theme(), kNameLines);
 
-  // The name is fitted to the room the row really gives it -- short of the pin
-  // and the "..." -- before the component sees it, so the component never has
-  // to cut it, and never cuts it with a glyph the face does not carry.
-  fui::TextStyle labelStyle = screen.theme().bodyText;
-  fui::TextStyle subtitleStyle = toybox::buttonText(screen.theme());
-  subtitleStyle.align = fui::TextAlign::Left;
-
-  std::string names[kMaxRowsOnPage];
-  char details[kMaxRowsOnPage][toybox::kIntTextChars + 8];
-  fui::ListItem items[kMaxRowsOnPage];
+  int16_t y = box.rows.y;
   for (int i = 0; i < count; ++i) {
     const ListRow& row = model.rows[i];
-    const fui::Rect rect = rowRect(box.rows, i, kListRowHeight);
-    const int16_t textLeft = static_cast<int16_t>(rect.x + kTextInset);
-    const int16_t textRight =
-        static_cast<int16_t>((row.pinned ? pinRect(rect).x : moreRect(rect).x) - toybox::kGutter);
-    names[i] = toybox::fitLines(screen.target(), row.name, static_cast<int16_t>(textRight - textLeft), 1, labelStyle);
-    detailFor(row, details[i], sizeof(details[i]));
-    items[i].label = names[i].c_str();
-    items[i].subtitle = details[i];
-    items[i].actionValue = row.value;
-  }
+    const int16_t width = nameWidth(box.rows, row.pinned);
+    const int16_t height = rowHeightFor(screen.target(), screen.theme(), row.name, width, kNameLines, true);
+    // Stacked from the band's top, gap between; a row the page did not really
+    // have room for is not drawn below the band.
+    if (y + height > box.rows.bottom()) break;
+    const fui::Rect rect = fui::makeRect(box.rows.x, y, box.rows.width, height);
+    y = static_cast<int16_t>(rect.bottom() + kRowGap);
 
-  fui::ListProps list;
-  list.items = items;
-  list.count = static_cast<uint16_t>(count);
-  list.topIndex = 0;
-  // Touch only: nothing moves a cursor here, so no row is ever the marked one.
-  list.selectedIndex = -1;
-  list.action = ActionOpenList;
-  list.labelText = labelStyle;
-  list.subtitleText = subtitleStyle;
-  // Stated, not inherited: the component sizes a two-line row to its lines,
-  // and rowRect() above has to agree with it. See kListRowHeight.
-  list.rowHeight = kListRowHeight;
-  list.rowGap = kRowGap;
-  list.sidePadding = kTextInset;
-  screen.list(list);
-
-  // What the component does not draw, on the rows it did. Registered AFTER the
-  // list, because route() scans newest-first: the "..." wins over the row
-  // under it, and the rest of the row still opens the list.
-  for (int i = 0; i < count; ++i) {
-    const ListRow& row = model.rows[i];
-    const fui::Rect rect = rowRect(box.rows, i, kListRowHeight);
+    // The row first, so the "..." registered after it wins: route() scans
+    // newest-first, and the rest of the row still opens the list.
+    rowFrame(screen, rect, ActionOpenList, row.value);
+    char detail[toybox::kIntTextChars + 8];
+    detailFor(row, detail, sizeof(detail));
+    rowText(screen, rect, fit(screen.target(), row.name, width, label), width, label, detail);
     mark(screen, rect, row.complete);
 
     if (row.pinned) {
@@ -280,7 +352,6 @@ void buildItems(toybox::Screen& screen, const ItemsModel& model) {
     screen.target().text(box.status, kComplete, status);
   }
 
-  contentToRows(screen, box);
   actionPill(screen, box, kAddItem, ActionAddItem);
 
   if (model.empty) {
@@ -289,35 +360,20 @@ void buildItems(toybox::Screen& screen, const ItemsModel& model) {
   }
   if (model.count <= 0) return;
   const int count = model.count > kMaxRowsOnPage ? kMaxRowsOnPage : model.count;
+  const fui::TextStyle label = labelStyle(screen.theme(), kItemLines);
+  const int16_t width = itemWidth(box.rows);
 
-  fui::TextStyle labelStyle = screen.theme().bodyText;
-  std::string texts[kMaxRowsOnPage];
-  fui::ListItem items[kMaxRowsOnPage];
+  int16_t y = box.rows.y;
   for (int i = 0; i < count; ++i) {
     const ItemRow& row = model.rows[i];
-    const fui::Rect rect = rowRect(box.rows, i, kItemRowHeight);
-    const int16_t width = static_cast<int16_t>(rect.width - kTextInset - toybox::kGutter);
-    texts[i] = toybox::fitLines(screen.target(), row.text, width, 1, labelStyle);
-    items[i].label = texts[i].c_str();
-    items[i].actionValue = row.value;
-  }
+    const int16_t height = rowHeightFor(screen.target(), screen.theme(), row.text, width, kItemLines, false);
+    if (y + height > box.rows.bottom()) break;
+    const fui::Rect rect = fui::makeRect(box.rows.x, y, box.rows.width, height);
+    y = static_cast<int16_t>(rect.bottom() + kRowGap);
 
-  fui::ListProps list;
-  list.items = items;
-  list.count = static_cast<uint16_t>(count);
-  list.topIndex = 0;
-  list.selectedIndex = -1;
-  // The whole row toggles. One target per row rather than a box and a label,
-  // because the finger is already on the row and a box is under half a thumb.
-  list.action = ActionToggleItem;
-  list.labelText = labelStyle;
-  list.rowHeight = kItemRowHeight;
-  list.rowGap = kRowGap;
-  list.sidePadding = kTextInset;
-  screen.list(list);
-
-  for (int i = 0; i < count; ++i) {
-    mark(screen, rowRect(box.rows, i, kItemRowHeight), model.rows[i].complete);
+    rowFrame(screen, rect, ActionToggleItem, row.value);
+    rowText(screen, rect, fit(screen.target(), row.text, width, label), width, label, nullptr);
+    mark(screen, rect, row.complete);
   }
 }
 

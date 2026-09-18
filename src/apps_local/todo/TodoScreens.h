@@ -6,8 +6,17 @@
 // renderer, no activity, no storage, which is what lets host-tests/todo build
 // the real screens and route real taps at them. See ToyboxScreen.h for why
 // screens are written this way.
+//
+// The rows are drawn here rather than by the SDK's list component, and the
+// reason is wrapping. A name or an item that does not fit one line wraps onto
+// the next, so a row is as tall as its text; the component can grow a row too,
+// but it then owns where every row is, and the "..." control and the pin this
+// screen draws ON a row would have to guess. Here one function says how tall a
+// row is, one loop places them, and the same rects are drawn and registered.
 
 #include <FreeInkUI.h>
+
+#include <vector>
 
 #include "../ui/ToyboxScreen.h"
 
@@ -37,7 +46,7 @@ extern const char* const kNoLists;    // the empty main screen
 extern const char* const kNoItems;    // the empty list
 extern const char* const kOpenOne;    // "1 OPEN"
 extern const char* const kOpenMany;   // "%d OPEN"
-extern const char* const kNoItemsYet; // the subtitle of an empty list
+extern const char* const kNoItemsYet; // the detail line of an empty list
 
 // One row of the main screen. Strings are borrowed for the length of the build.
 struct ListRow {
@@ -50,8 +59,8 @@ struct ListRow {
 };
 
 // The current page's rows, and only those: the caller slices, so rows[0] is
-// the top row on the panel. See shelfui::MenuModel for why a page is passed as
-// a short list rather than as the whole list plus an offset.
+// the top row on the panel. The caller paged with pageStarts() over the same
+// heights this builder measures, so every row it hands over fits.
 struct ListsModel {
   const ListRow* rows = nullptr;
   int count = 0;
@@ -82,40 +91,52 @@ struct ItemsModel {
 // WHERE EVERYTHING IS, decided once, in absolute panel rows (see
 // ToyboxMetrics.h). Both screens are the same shape: the chrome, an optional
 // status line under it, a band of rows, and a pill on the margin at the foot.
-// The builders draw from these rects and register the same rects as targets,
-// and the activity asks rowsPerPage() of the same band, so the three cannot
-// disagree about where a row is.
 struct Layout {
   fui::Rect status;  // one line under the chrome; zero height on the main screen
-  fui::Rect rows;    // where the list component lays its rows
+  fui::Rect rows;    // where the rows are stacked
   fui::Rect action;  // the pill
 };
 
 Layout layout(const fui::DeviceContext& device, bool withStatus);
 
-// Row heights. A list row carries a name and a count under it, and the
-// component sizes a two-line row to its two lines whatever the theme says --
-// so the number is stated here and handed to the component, rather than read
-// back from the theme and found to be wrong by seven pixels. An item row is
-// one line and takes the fork's ordinary row.
-constexpr int16_t kListRowHeight = 76;
-constexpr int16_t kItemRowHeight = toybox::kRowHeight;
+// How many lines a text may take before it is cut with an ellipsis. Three,
+// for both: the keyboard stops at todo::kMaxTextChars, and at the reading
+// cut's width a pinned name of that length needs three lines. Anything that
+// can be typed therefore wraps whole; the ellipsis is left for a file edited
+// by hand.
+constexpr int kNameLines = 3;
+constexpr int kItemLines = 3;
+
 constexpr int16_t kRowGap = 4;
 
 // The most rows either band can hold: 800 panel rows less the chrome, the
-// margin and the pill, at the shorter row. Bounds the per-row scratch in the
+// margin and the pill, at the shortest row. Bounds the per-row scratch in the
 // builders and the activity; a page longer than this is a bug in the paging,
 // and is clipped rather than overrun.
 constexpr int kMaxRowsOnPage = 12;
 
-// How many rows fit `rows` at `rowHeight`: what the activity pages by.
-int rowsPerPage(const fui::Rect& rows, int16_t rowHeight);
+// The width a row's text may run: from the text inset to the pin or the "..."
+// on the main screen, to the row's own padding on a list's.
+int16_t nameWidth(const fui::Rect& rows, bool pinned);
+int16_t itemWidth(const fui::Rect& rows);
 
-// Row `index` of a band, counting from the band's first row, and the two
-// things drawn ON a row that the component knows nothing about. Each is used
-// twice, by the builder to draw and to register, so the hit target is where
-// the ink is by construction.
-fui::Rect rowRect(const fui::Rect& rows, int index, int16_t rowHeight);
+// How tall a row is: its text wrapped to at most `maxLines` in `width`, the
+// detail line under it when `withDetail`, and padding, never shorter than the
+// theme's row. The activity asks this to page and the builder asks it to draw,
+// with the same arguments, so the two cannot disagree.
+int16_t rowHeightFor(const fui::DrawTarget& target, const fui::ThemeTokens& tokens, const char* text, int16_t width,
+                     int maxLines, bool withDetail);
+
+// The first row of every page, filling each page greedily with rows of the
+// given `heights` separated by kRowGap. Always at least one page, so
+// `starts.size()` is the page count; a row taller than the band gets a page
+// of its own rather than being skipped.
+std::vector<int> pageStarts(const fui::Rect& rows, const int16_t* heights, int count);
+// The page holding row `index`.
+int pageOf(const std::vector<int>& starts, int index);
+
+// The things drawn ON a row. Each is used twice, by the builder to draw and to
+// register, so the hit target is where the ink is by construction.
 // The box at the left: outlined for open, filled with a tick for complete.
 fui::Rect markRect(const fui::Rect& row);
 // The "..." control at the right of a list row: a thumb wide, the row tall.
