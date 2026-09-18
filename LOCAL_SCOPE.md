@@ -20,7 +20,7 @@ that makes reading better belongs upstream, so send it there.
 What we add is **games and small tools that make the device worth carrying
 instead of a phone**: a shelf of games, plus the small apps beside them -- a
 spaced-repetition trainer, readers for Hacker News and xkcd, a catalog browser,
-a read-later queue.
+a read-later queue, a to-do list.
 
 `src/apps_local/Shelf.cpp` is the list of what is here, and it is the only one.
 No total is written down in this file, for the same reason the count of

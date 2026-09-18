@@ -83,7 +83,7 @@ the import lands a real pack instead of failing on an unreachable host.
 | **Instapaper**  | Your read-later queue, synced both ways: reading position and archiving. |
 | **Wallpapers**  | Pick an image on the card as the sleep screen, one tap to set it.        |
 | **Wikipedia**   | Fifty thousand articles on the card, read like a book, no internet.      |
-| **To Do**       | Lists of things to do, ticked off by touch, kept on the card.            |
+| **To Do**       | Lists of things to do: tick, pin or bin them. One text file on the card. |
 
 And the reader is still CrossPoint's reader: the EPUB engine, sync and the file
 browser are theirs and stay theirs.

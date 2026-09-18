@@ -1,6 +1,6 @@
 # What is in docs/apps/
 
-One directory, 34 files, and until this index they were a raw file listing. A
+One directory, 39 files, and until this index they were a raw file listing. A
 doc lands here when something about an app would otherwise be rediscovered the
 hard way; not every app has one, and some have several.
 
@@ -19,6 +19,7 @@ upstream's and covers the reader, not these.
 | [`study.md`](study.md) | Anki decks on the reader: the deck, the scheduler, and what a review does. |
 | [`instapaper.md`](instapaper.md) | The read-later queue and how it syncs. |
 | [`trivia.md`](trivia.md) | The question app, and where the questions come from. |
+| [`todo.md`](todo.md) | Lists of things to do: ticking, pinning, the bin, and the one text file they live in. |
 
 ## The rules a game implements
 
@@ -62,6 +63,7 @@ The on-disk shapes. Read these before changing a writer.
 | [`study-anki-compatibility.md`](study-anki-compatibility.md) | What converts, what is reduced, what stays behind. |
 | [`trivia-pack-format.md`](trivia-pack-format.md) | |
 | [`xkcd-pack-format.md`](xkcd-pack-format.md) | |
+| [`todo.md#the-file-on-the-card`](todo.md#the-file-on-the-card) | One entry per line; the app's only file. |
 
 ## Decision records for things that shipped
 
