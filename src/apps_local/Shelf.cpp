@@ -34,6 +34,8 @@
 #include "solitaire/SolitaireActivity.h"
 #include "study/StudyActivity.h"
 #include "sudoku/SudokuActivity.h"
+#include "todo/TodoActivity.h"
+#include "todo/TodoIcons.h"
 #include "toybattle/ToyBattleActivity.h"
 #include "trivia/TriviaActivity.h"
 #include "ui/ToyboxIcons.h"
@@ -79,6 +81,7 @@ constexpr shelf::Item kApps[] = {
     {"INSTAPAPER", &icon_instapaper_32, &InstapaperActivity::create},
     {"WALLPAPERS", &icon_wallpapers_32, &WallpapersActivity::create},
     {"WIKIPEDIA", &icon_wikipedia_32, &WikipediaActivity::create},
+    {"TO DO", &icon_todo_32, &TodoActivity::create},
 };
 
 // The two rows Home grows, in reading order. Titles are Title Case because
