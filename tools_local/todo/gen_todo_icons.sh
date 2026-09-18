@@ -15,4 +15,10 @@ python3 freeink-sdk/libs/assets/Icons/tools/gen_icons.py \
   --svgdir freeink-sdk/libs/assets/Icons/lucide/icons \
   --sizes 24,32 \
   --out src/apps_local/todo/TodoIcons.h
+# The generator writes its own layout; the tree is formatted by clang-format
+# and CI checks every file, so the header is formatted here when the tool is
+# there (ToyboxIcons.h is committed formatted the same way).
+if command -v clang-format-21 >/dev/null 2>&1; then
+  clang-format-21 -style=file -i src/apps_local/todo/TodoIcons.h
+fi
 echo "wrote src/apps_local/todo/TodoIcons.h"

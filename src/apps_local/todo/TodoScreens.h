@@ -41,25 +41,25 @@ enum : fui::ActionId {
 };
 
 // The words on the screens, named so the tests can ask for them by name.
-extern const char* const kTitle;      // the main screen's band
-extern const char* const kNewList;    // the pill under the lists
-extern const char* const kAddItem;    // the pill under the items
-extern const char* const kComplete;   // the status line of a finished list
-extern const char* const kNoLists;    // the empty main screen
-extern const char* const kNoItems;    // the empty list
-extern const char* const kOpenOne;    // "1 OPEN"
-extern const char* const kOpenMany;   // "%d OPEN"
-extern const char* const kNoItemsYet; // the detail line of an empty list
-extern const char* const kBinCaption; // the status line while in bin mode
+extern const char* const kTitle;       // the main screen's band
+extern const char* const kNewList;     // the pill under the lists
+extern const char* const kAddItem;     // the pill under the items
+extern const char* const kComplete;    // the status line of a finished list
+extern const char* const kNoLists;     // the empty main screen
+extern const char* const kNoItems;     // the empty list
+extern const char* const kOpenOne;     // "1 OPEN"
+extern const char* const kOpenMany;    // "%d OPEN"
+extern const char* const kNoItemsYet;  // the detail line of an empty list
+extern const char* const kBinCaption;  // the status line while in bin mode
 
 // One row of the main screen. Strings are borrowed for the length of the build.
 struct ListRow {
   const char* name = "";
-  int open = 0;          // items still to do
-  int total = 0;         // items in the list
+  int open = 0;   // items still to do
+  int total = 0;  // items in the list
   bool pinned = false;
   bool complete = false;
-  int16_t value = 0;     // index in the store; see the enum
+  int16_t value = 0;  // index in the store; see the enum
 };
 
 // The current page's rows, and only those: the caller slices, so rows[0] is
@@ -79,7 +79,7 @@ struct ItemRow {
   // tick or outline with an X; the item itself is untouched until the bin is
   // pressed again.
   bool doomed = false;
-  int16_t value = 0;     // index in the list
+  int16_t value = 0;  // index in the list
 };
 
 struct ItemsModel {

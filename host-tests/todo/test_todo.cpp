@@ -62,8 +62,7 @@ class FakeTarget final : public fui::DrawTarget {
   void fill(const fui::Rect rect, const fui::Paint, const uint8_t = 0, const uint8_t = 0) override {
     fills.push_back(rect);
   }
-  void stroke(const fui::Rect rect, const fui::Paint, const uint8_t, const uint8_t = 0,
-              const uint8_t = 0) override {
+  void stroke(const fui::Rect rect, const fui::Paint, const uint8_t, const uint8_t = 0, const uint8_t = 0) override {
     strokes.push_back(rect);
   }
   void line(const fui::Point, const fui::Point, const uint8_t, const fui::Paint) override {}
@@ -302,12 +301,12 @@ void testMarkAllSetsEveryItem() {
 void testSortingRespectsTheGroups() {
   // 7. Pinned incomplete, incomplete, pinned complete, complete.
   std::vector<todo::List> lists;
-  lists.push_back(listOf("done", {{"a", true}}));                  // 0: complete
-  lists.push_back(listOf("open", {{"a", false}}));                 // 1: incomplete
-  lists.push_back(listOf("pinned done", {{"a", true}}, true));     // 2: pinned complete
-  lists.push_back(listOf("pinned open", {{"a", false}}, true));    // 3: pinned incomplete
-  lists.push_back(listOf("empty", {}));                            // 4: incomplete (empty is not done)
-  lists.push_back(listOf("pinned empty", {}, true));               // 5: pinned incomplete
+  lists.push_back(listOf("done", {{"a", true}}));                // 0: complete
+  lists.push_back(listOf("open", {{"a", false}}));               // 1: incomplete
+  lists.push_back(listOf("pinned done", {{"a", true}}, true));   // 2: pinned complete
+  lists.push_back(listOf("pinned open", {{"a", false}}, true));  // 3: pinned incomplete
+  lists.push_back(listOf("empty", {}));                          // 4: incomplete (empty is not done)
+  lists.push_back(listOf("pinned empty", {}, true));             // 5: pinned incomplete
 
   CHECK(todo::sortGroup(lists[3]) == 0);
   CHECK(todo::sortGroup(lists[1]) == 1);
@@ -443,18 +442,18 @@ void testADamagedFileCostsOnlyItsDamagedLines() {
   std::string file;
   file += "# CrossPlay TO DO v1\r\n";
   file += "I|0|orphan before any list\n";  // no list to join
-  file += "L|1|Shopping\r\n";               // CRLF
+  file += "L|1|Shopping\r\n";              // CRLF
   file += "I|0|Milk\n";
-  file += "I|2|bad flag\n";                 // not 0 or 1
-  file += "I|1|\n";                         // empty text
-  file += "I|1|   \n";                      // blank text
+  file += "I|2|bad flag\n";  // not 0 or 1
+  file += "I|1|\n";          // empty text
+  file += "I|1|   \n";       // blank text
   file += "garbage\n";
   file += "\n";
   file += "X|0|unknown kind\n";
   file += "I|1|Coffee\n";
-  file += "L|0|   \n";                      // a list with no name
+  file += "L|0|   \n";                           // a list with no name
   file += "I|0|would join the nameless list\n";  // joins Shopping instead: the nameless one was never made
-  file += "L|0|Work";                       // no trailing newline
+  file += "L|0|Work";                            // no trailing newline
 
   std::vector<todo::List> lists;
   todo::decode(file, lists);

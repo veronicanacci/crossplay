@@ -139,9 +139,8 @@ void chrome(toybox::Screen& screen, const char* title, const int page, const int
 
   if (pageCount > 1) {
     const int16_t width = screen.device().screen().width;
-    const fui::Rect box =
-        fui::makeRect(0, toybox::bandCenterY(screen, toybox::kButtonCut.inkHeight),
-                      static_cast<int16_t>(width - toybox::kMargin), toybox::kButtonCut.inkHeight);
+    const fui::Rect box = fui::makeRect(0, toybox::bandCenterY(screen, toybox::kButtonCut.inkHeight),
+                                        static_cast<int16_t>(width - toybox::kMargin), toybox::kButtonCut.inkHeight);
     screen.target().text(toybox::inkCentred(box, toybox::kButtonCut), counter, style);
   }
 }
@@ -192,8 +191,8 @@ void rowText(toybox::Screen& screen, const fui::Rect& row, const FittedText& fit
   screen.target().text(fui::makeRect(left, top, width, static_cast<int16_t>(labelLh * fitted.lines)),
                        fitted.text.c_str(), style);
   if (detail != nullptr) {
-    screen.target().text(
-        fui::makeRect(left, static_cast<int16_t>(top + labelLh * fitted.lines), width, detailLh), detail, small);
+    screen.target().text(fui::makeRect(left, static_cast<int16_t>(top + labelLh * fitted.lines), width, detailLh),
+                         detail, small);
   }
 }
 
@@ -320,8 +319,8 @@ fui::Rect moreRect(const fui::Rect& row) {
 
 fui::Rect pinRect(const fui::Rect& row) {
   const fui::Rect more = moreRect(row);
-  return fui::makeRect(static_cast<int16_t>(more.x - kPinSize), static_cast<int16_t>(row.y + (row.height - kPinSize) / 2),
-                       kPinSize, kPinSize);
+  return fui::makeRect(static_cast<int16_t>(more.x - kPinSize),
+                       static_cast<int16_t>(row.y + (row.height - kPinSize) / 2), kPinSize, kPinSize);
 }
 
 void buildLists(toybox::Screen& screen, const ListsModel& model) {

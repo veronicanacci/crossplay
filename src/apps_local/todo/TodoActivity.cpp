@@ -88,8 +88,10 @@ void TodoActivity::loop() {
   // The two side keys and a vertical swipe page the rows, the way the shelf's
   // folders and the Hacker News front page do.
   const MappedInputManager::SwipeDir swipe = mappedInput.wasSwipe();
-  const bool next = mappedInput.wasReleased(MappedInputManager::Button::Down) || swipe == MappedInputManager::SwipeDir::Up;
-  const bool prev = mappedInput.wasReleased(MappedInputManager::Button::Up) || swipe == MappedInputManager::SwipeDir::Down;
+  const bool next =
+      mappedInput.wasReleased(MappedInputManager::Button::Down) || swipe == MappedInputManager::SwipeDir::Up;
+  const bool prev =
+      mappedInput.wasReleased(MappedInputManager::Button::Up) || swipe == MappedInputManager::SwipeDir::Down;
   if (next || prev) {
     page(next ? 1 : -1);
     return;
