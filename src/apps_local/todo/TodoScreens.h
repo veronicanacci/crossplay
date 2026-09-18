@@ -33,8 +33,11 @@ enum : fui::ActionId {
   ActionOpenList = 1,    // the body of a list row
   ActionListMenu = 2,    // the "..." at the right of a list row
   ActionNewList = 3,     // the pill at the foot of the main screen
-  ActionToggleItem = 4,  // an item row, all of it
+  ActionToggleItem = 4,  // an item row, all of it; in bin mode, marks it instead
   ActionAddItem = 5,     // the pill at the foot of a list
+  // The square at the left of the foot: enters bin mode, and pressed again
+  // removes what was marked (or, with nothing marked, just leaves the mode).
+  ActionBin = 6,
 };
 
 // The words on the screens, named so the tests can ask for them by name.
@@ -47,6 +50,7 @@ extern const char* const kNoItems;    // the empty list
 extern const char* const kOpenOne;    // "1 OPEN"
 extern const char* const kOpenMany;   // "%d OPEN"
 extern const char* const kNoItemsYet; // the detail line of an empty list
+extern const char* const kBinCaption; // the status line while in bin mode
 
 // One row of the main screen. Strings are borrowed for the length of the build.
 struct ListRow {
@@ -71,6 +75,10 @@ struct ListsModel {
 struct ItemRow {
   const char* text = "";
   bool complete = false;
+  // Marked for removal. Only read in bin mode, where it replaces the box's
+  // tick or outline with an X; the item itself is untouched until the bin is
+  // pressed again.
+  bool doomed = false;
   int16_t value = 0;     // index in the list
 };
 
@@ -84,6 +92,10 @@ struct ItemsModel {
   // Whether the whole list has no items. Distinct from count == 0, which is
   // also true of an empty page past the end.
   bool empty = false;
+  // Bin mode: the bin button is drawn pressed, the status line says what a tap
+  // now does, ADD ITEM is dimmed and disabled, and each row shows its `doomed`
+  // mark. The rows themselves neither move nor change size.
+  bool binning = false;
   int page = 0;
   int pageCount = 1;
 };
@@ -94,9 +106,11 @@ struct ItemsModel {
 struct Layout {
   fui::Rect status;  // one line under the chrome; zero height on the main screen
   fui::Rect rows;    // where the rows are stacked
-  fui::Rect action;  // the pill
+  fui::Rect bin;     // the square at the left of the foot; zero width on the main screen
+  fui::Rect action;  // the pill, taking the rest of the foot
 };
 
+// `withStatus` is the list screen, which is also the screen with the bin.
 Layout layout(const fui::DeviceContext& device, bool withStatus);
 
 // How many lines a text may take before it is cut with an ellipsis. Three,

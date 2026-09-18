@@ -375,6 +375,32 @@ void testDeletingRemovesTheRightList() {
   CHECK(store.lists.size() == 2);
 }
 
+void testRemovingItemsTakesExactlyTheMarkedOnes() {
+  todo::Store store;
+  const int list = store.addList("Shopping");
+  for (const char* text : {"Milk", "Coffee", "Cat food", "Bread"}) store.addItem(list, text);
+  store.toggleItem(list, 1);
+
+  // Marks on the first and third; the others keep their place and their state.
+  std::vector<bool> doomed = {true, false, true, false};
+  CHECK(store.removeItems(list, doomed) == 2);
+  CHECK(store.lists[list].items.size() == 2);
+  CHECK(store.lists[list].items[0].text == "Coffee");
+  CHECK(store.lists[list].items[0].complete);
+  CHECK(store.lists[list].items[1].text == "Bread");
+  CHECK(!store.lists[list].items[1].complete);
+
+  // No marks, nothing goes; marks past the end are not read.
+  CHECK(store.removeItems(list, {}) == 0);
+  CHECK(store.removeItems(list, {false, false, true, true, true}) == 0);
+  CHECK(store.lists[list].items.size() == 2);
+  // Every mark set empties the list, which is then not complete.
+  CHECK(store.removeItems(list, {true, true}) == 2);
+  CHECK(store.lists[list].items.empty());
+  CHECK(!todo::isComplete(store.lists[list]));
+  CHECK(store.removeItems(3, {true}) == 0);
+}
+
 void testTheFileRoundTrips() {
   // 10. Encode then decode is the identity.
   std::vector<todo::List> lists;
@@ -520,6 +546,21 @@ void testLayoutFitsThePanelUnderTheChrome() {
       CHECK(box.rows.y == toybox::kBodyTop);
     }
   }
+  // The foot: no bin on the main screen and the pill runs the whole width; on
+  // a list the bin is a square at the left and the pill takes the rest.
+  const todoui::Layout main = todoui::layout(device(), false);
+  CHECK(main.bin.width == 0);
+  CHECK(main.action.x == toybox::kMargin);
+  CHECK(main.action.width == 480 - 2 * toybox::kMargin);
+  const todoui::Layout list = todoui::layout(device(), true);
+  CHECK(list.bin.width == toybox::kPillHeight);
+  CHECK(list.bin.height == toybox::kPillHeight);
+  CHECK(list.bin.x == toybox::kMargin);
+  CHECK(list.bin.y == list.action.y);
+  CHECK(list.action.x == list.bin.right() + toybox::kGutter);
+  CHECK(list.action.right() == 480 - toybox::kMargin);
+  CHECK(list.action.width >= 300);
+
   // A name has less room than an item: the "..." takes some, the pin more.
   const todoui::Layout box = todoui::layout(device(), false);
   CHECK(todoui::nameWidth(box.rows, false) > todoui::nameWidth(box.rows, true));
@@ -931,6 +972,77 @@ void testCompleteIsSaidOnlyWhenItIs() {
   CHECK(blank.tap(240, box.action.y + 10).action == todoui::ActionAddItem);
 }
 
+void testBinModeMarksInsteadOfTicking() {
+  todoui::ItemRow rows[3];
+  rows[0].text = "Buy milk";
+  rows[0].value = 0;
+  rows[1].text = "Buy coffee";
+  rows[1].complete = true;
+  rows[1].value = 1;
+  rows[2].text = "Cat food";
+  rows[2].value = 2;
+  todoui::ItemsModel model;
+  model.title = "SHOPPING";
+  model.rows = rows;
+  model.count = 3;
+  const todoui::Layout box = todoui::layout(device(), true);
+
+  // Out of bin mode: the bin is there, ADD ITEM works, no caption, no X marks.
+  Rendered plain;
+  plain.items(model);
+  CHECK(plain.registered(todoui::ActionBin, 0, box.bin));
+  CHECK(plain.tap(box.bin.x + 10, box.bin.y + 10).action == todoui::ActionBin);
+  CHECK(plain.tap(box.action.x + 10, box.action.y + 10).action == todoui::ActionAddItem);
+  CHECK(!plain.drew("TAP ITEMS TO REMOVE"));
+  const std::vector<fui::Rect> rects = itemRects(plain.target, rows, 3);
+  auto glyphOf = [](const fui::Rect& row) {
+    const fui::Rect markBox = todoui::markRect(row);
+    return fui::makeRect(static_cast<int16_t>(markBox.x + (markBox.width - 24) / 2),
+                         static_cast<int16_t>(markBox.y + (markBox.height - 24) / 2), 24, 24);
+  };
+  // Only the done row carries a glyph (its tick).
+  CHECK(!plain.blitted(glyphOf(rects[0])));
+  CHECK(plain.blitted(glyphOf(rects[1])));
+  CHECK(!plain.blitted(glyphOf(rects[2])));
+
+  // In bin mode, with the first and the done row marked.
+  rows[0].doomed = true;
+  rows[1].doomed = true;
+  model.binning = true;
+  model.complete = true;  // would say COMPLETE, but the bin's caption wins
+  Rendered binning;
+  binning.items(model);
+  CHECK(binning.drew("TAP ITEMS TO REMOVE"));
+  CHECK(!binning.drew("COMPLETE"));
+  // The bin still answers; ADD ITEM is drawn but takes no tap.
+  CHECK(binning.tap(box.bin.x + 10, box.bin.y + 10).action == todoui::ActionBin);
+  CHECK(binning.drew("ADD ITEM"));
+  CHECK(binning.slotsFor(todoui::ActionAddItem) == 0);
+  CHECK(!binning.tap(box.action.x + 10, box.action.y + 10));
+  // Rows are where they were, and still route as item taps; the activity
+  // reads them as marks while binning.
+  const std::vector<fui::Rect> binRects = itemRects(binning.target, rows, 3);
+  for (size_t i = 0; i < 3; ++i) CHECK(sameRect(binRects[i], rects[i]));
+  CHECK(binning.tap(200, rects[2].y + 10).action == todoui::ActionToggleItem);
+  // A marked row shows an X in an OUTLINED box, whatever its own state: the
+  // done row's slab and tick give way to it.
+  CHECK(binning.blitted(glyphOf(rects[0])));
+  CHECK(binning.stroked(todoui::markRect(rects[0])));
+  CHECK(binning.blitted(glyphOf(rects[1])));
+  CHECK(binning.stroked(todoui::markRect(rects[1])));
+  CHECK(!binning.filled(todoui::markRect(rects[1])));
+  // The unmarked row is as it was.
+  CHECK(!binning.blitted(glyphOf(rects[2])));
+  CHECK(binning.stroked(todoui::markRect(rects[2])));
+
+  // A mark is only read in bin mode: the same rows out of it draw no X.
+  model.binning = false;
+  Rendered after;
+  after.items(model);
+  CHECK(!after.blitted(glyphOf(rects[0])));
+  CHECK(after.filled(todoui::markRect(rects[1])));
+}
+
 }  // namespace
 
 int main() {
@@ -940,6 +1052,7 @@ int main() {
   testSortingRespectsTheGroups();
   testOrderIsStableWithinAGroup();
   testDeletingRemovesTheRightList();
+  testRemovingItemsTakesExactlyTheMarkedOnes();
   testTheFileRoundTrips();
   testADamagedFileCostsOnlyItsDamagedLines();
   testBlankNamesAreRefused();
@@ -953,6 +1066,7 @@ int main() {
   testTheEmptyShelfSaysSo();
   testAnItemRowTogglesWhereverItIsTapped();
   testCompleteIsSaidOnlyWhenItIs();
+  testBinModeMarksInsteadOfTicking();
 
   std::printf("todo: %d checks, %d failed\n", checks, failures);
   return failures == 0 ? 0 : 1;

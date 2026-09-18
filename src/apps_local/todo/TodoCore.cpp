@@ -108,6 +108,23 @@ bool Store::toggleItem(const int list, const int item) {
   return true;
 }
 
+int Store::removeItems(const int list, const std::vector<bool>& doomed) {
+  if (!validList(list)) return 0;
+  std::vector<Item>& items = lists[list].items;
+  std::vector<Item> kept;
+  kept.reserve(items.size());
+  int removed = 0;
+  for (size_t i = 0; i < items.size(); ++i) {
+    if (i < doomed.size() && doomed[i]) {
+      ++removed;
+    } else {
+      kept.push_back(items[i]);
+    }
+  }
+  if (removed > 0) items.swap(kept);
+  return removed;
+}
+
 int pageStep(const int page, const int pageCount, const int delta) {
   if (pageCount <= 1) return 0;
   const int from = page < 0 ? 0 : (page >= pageCount ? pageCount - 1 : page);

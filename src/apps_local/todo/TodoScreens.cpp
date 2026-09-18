@@ -20,6 +20,7 @@ const char* const kNoItems = "No items yet.";
 const char* const kOpenOne = "1 OPEN";
 const char* const kOpenMany = "%d OPEN";
 const char* const kNoItemsYet = "NO ITEMS";
+const char* const kBinCaption = "TAP ITEMS TO REMOVE";
 
 namespace {
 
@@ -55,6 +56,23 @@ fui::StyleSet invisible() {
   // the default button look, which is a black slab the size of the control.
   fui::StyleSet styles;
   styles.explicitlySet = true;
+  return styles;
+}
+
+// The bin while bin mode is on: the slab turned inside out, paper with a heavy
+// black edge and a black X, so the one control that changed state is the one
+// that looks different from every other pill on the device.
+fui::StyleSet binOnStyles() {
+  fui::StyleSet styles;
+  styles.explicitlySet = true;
+  styles.normal.background = fui::Paint::solid(fui::Color::White);
+  styles.normal.foreground = fui::Paint::solid(fui::Color::Black);
+  styles.normal.border = fui::Paint::solid(fui::Color::Black);
+  styles.normal.borderWidth = static_cast<uint8_t>(toybox::kRule);
+  styles.selected = styles.normal;
+  styles.focused = styles.normal;
+  styles.active = styles.normal;
+  styles.disabled = styles.normal;
   return styles;
 }
 
@@ -179,9 +197,21 @@ void rowText(toybox::Screen& screen, const fui::Rect& row, const FittedText& fit
   }
 }
 
-void mark(toybox::Screen& screen, const fui::Rect& row, const bool complete) {
+// The box on a row. Three states: an outline for open, a slab with a tick for
+// done, and -- in bin mode only -- an outline with an X for an item that will
+// go when the bin is pressed again. The X sits in an OUTLINED box whatever the
+// item's own state, so a ticked item chosen for removal reads as "leaving"
+// rather than as "done", and the outline says the choice is not yet acted on.
+void mark(toybox::Screen& screen, const fui::Rect& row, const bool complete, const bool doomed = false) {
   const fui::Paint ink = fui::Paint::solid(fui::Color::Black);
   const fui::Rect box = markRect(row);
+  const fui::Rect glyph = fui::makeRect(static_cast<int16_t>(box.x + (kBoxSize - kTickSize) / 2),
+                                        static_cast<int16_t>(box.y + (kBoxSize - kTickSize) / 2), kTickSize, kTickSize);
+  if (doomed) {
+    screen.target().stroke(box, ink, kBoxEdge, kBoxRadius);
+    screen.target().bitmap(glyph, fui::bitmapFromIcon(icon_todo_x_24), fui::BitmapMode::Contain, ink);
+    return;
+  }
   if (!complete) {
     screen.target().stroke(box, ink, kBoxEdge, kBoxRadius);
     return;
@@ -189,9 +219,7 @@ void mark(toybox::Screen& screen, const fui::Rect& row, const bool complete) {
   screen.target().fill(box, ink, kBoxRadius);
   // Paper on the slab: drawn in ink it would be invisible and nothing would
   // warn.
-  screen.target().bitmap(fui::makeRect(static_cast<int16_t>(box.x + (kBoxSize - kTickSize) / 2),
-                                       static_cast<int16_t>(box.y + (kBoxSize - kTickSize) / 2), kTickSize, kTickSize),
-                         fui::bitmapFromIcon(icon_tick_24), fui::BitmapMode::Contain,
+  screen.target().bitmap(glyph, fui::bitmapFromIcon(icon_tick_24), fui::BitmapMode::Contain,
                          fui::Paint::solid(fui::Color::White));
 }
 
@@ -215,8 +243,14 @@ Layout layout(const fui::DeviceContext& device, const bool withStatus) {
   const int16_t width = static_cast<int16_t>(device.width - toybox::kMargin * 2);
 
   Layout out;
-  out.action = fui::makeRect(left, static_cast<int16_t>(device.height - toybox::kMargin - toybox::kPillHeight), width,
-                             toybox::kPillHeight);
+  const int16_t footY = static_cast<int16_t>(device.height - toybox::kMargin - toybox::kPillHeight);
+  // The bin is a square the pill's height, at the left, and the pill takes
+  // what is left after a gutter. The main screen has no bin and its pill runs
+  // the whole width.
+  const int16_t binW = withStatus ? toybox::kPillHeight : 0;
+  out.bin = fui::makeRect(left, footY, binW, toybox::kPillHeight);
+  const int16_t pillX = withStatus ? static_cast<int16_t>(out.bin.right() + toybox::kGutter) : left;
+  out.action = fui::makeRect(pillX, footY, static_cast<int16_t>(left + width - pillX), toybox::kPillHeight);
   // Taken from toybox::kBodyTop rather than re-summed, so it cannot drift from
   // what headerBand() reserves.
   int16_t top = toybox::kBodyTop;
@@ -346,13 +380,35 @@ void buildItems(toybox::Screen& screen, const ItemsModel& model) {
   const Layout box = layout(screen.device(), true);
 
   // The status line is always reserved and only sometimes written, so the rows
-  // do not move when the last box is ticked.
-  if (model.complete) {
+  // do not move when the last box is ticked or the bin is opened. Bin mode
+  // takes the line over: what a tap does now matters more than whether the
+  // list was finished.
+  if (model.binning || model.complete) {
     fui::TextStyle status = toybox::buttonText(screen.theme());
-    screen.target().text(box.status, kComplete, status);
+    screen.target().text(box.status, model.binning ? kBinCaption : kComplete, status);
   }
 
-  actionPill(screen, box, kAddItem, ActionAddItem);
+  // The bin: a black square with an X, or, while bin mode is on, the same
+  // square inside out. Pressing it is one action whichever state it is in;
+  // the activity knows which.
+  fui::ButtonProps bin;
+  bin.action = ActionBin;
+  bin.icon = fui::bitmapFromIcon(icon_todo_x_32);
+  if (model.binning) bin.styles = binOnStyles();
+  screen.button(bin, box.bin);
+
+  if (model.binning) {
+    // Present but not usable: dithered rather than gone, so the foot keeps its
+    // shape. Nothing is added while things are being chosen for removal.
+    fui::ButtonProps pill;
+    pill.label = kAddItem;
+    pill.text = toybox::buttonText(screen.theme());
+    pill.styles = toybox::disabledButtonStyles();
+    pill.enabled = false;
+    screen.button(pill, box.action);
+  } else {
+    actionPill(screen, box, kAddItem, ActionAddItem);
+  }
 
   if (model.empty) {
     emptyState(screen, box.rows, kNoItems);
@@ -373,7 +429,7 @@ void buildItems(toybox::Screen& screen, const ItemsModel& model) {
 
     rowFrame(screen, rect, ActionToggleItem, row.value);
     rowText(screen, rect, fit(screen.target(), row.text, width, label), width, label, nullptr);
-    mark(screen, rect, row.complete);
+    mark(screen, rect, row.complete, model.binning && row.doomed);
   }
 }
 

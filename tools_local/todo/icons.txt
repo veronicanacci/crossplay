@@ -16,3 +16,8 @@ todo_pin  = pin
 # The "..." control at the right of every list row. Three discs, the one
 # glyph every touch UI already reads as "more actions".
 todo_more = ellipsis
+
+# The bin: the button that enters and leaves bin mode, and the mark on an item
+# chosen for removal. A plain X rather than a trash can, because the same
+# shape has to read at 24px inside a box and the can's lid and body blur there.
+todo_x    = x

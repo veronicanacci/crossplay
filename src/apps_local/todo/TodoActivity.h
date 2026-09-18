@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "../../activities/Activity.h"
 #include "../../components/OptionPopup.h"
@@ -48,6 +49,12 @@ class TodoActivity final : public Activity {
   View view = View::Lists;
   // The open list, as an index into the store. Only meaningful in View::Items.
   int openList = -1;
+  // Bin mode on the open list: taps mark items instead of ticking them, and
+  // `doomed` holds the marks, one per item, until the bin is pressed again
+  // (remove) or Back is (forget). Cleared whenever the list screen is left.
+  bool binning = false;
+  std::vector<bool> doomed;
+  void leaveBinMode();
   int listsPage = 0;
   int itemsPage = 0;
   // Counted by render(), which is the only place that can: rows are as tall as

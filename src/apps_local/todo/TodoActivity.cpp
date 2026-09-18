@@ -70,7 +70,12 @@ void TodoActivity::loop() {
   // this is also the left-edge swipe, which MappedInputManager folds into the
   // same release.
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    if (view == View::Items) {
+    if (view == View::Items && binning) {
+      // Back out of bin mode first, forgetting the marks: nothing was removed
+      // and nothing will be.
+      leaveBinMode();
+      requestUpdate();
+    } else if (view == View::Items) {
       view = View::Lists;
       openList = -1;
       requestUpdate();
@@ -113,6 +118,7 @@ void TodoActivity::handle(const freeink::ui::ActionEvent& event) {
       openList = event.value;
       view = View::Items;
       itemsPage = 0;
+      leaveBinMode();
       requestUpdate();
       return;
 
@@ -134,10 +140,32 @@ void TodoActivity::handle(const freeink::ui::ActionEvent& event) {
       return;
 
     case todoui::ActionToggleItem:
+      if (binning) {
+        // A mark, not an edit: nothing is saved until the bin is pressed.
+        if (event.value >= 0 && static_cast<size_t>(event.value) < doomed.size()) {
+          doomed[event.value] = !doomed[event.value];
+          requestUpdate();
+        }
+        return;
+      }
       if (store.toggleItem(openList, event.value)) {
         save();
         requestUpdate();
       }
+      return;
+
+    case todoui::ActionBin:
+      if (!store.validList(openList)) return;
+      if (!binning) {
+        binning = true;
+        doomed.assign(store.lists[openList].items.size(), false);
+      } else {
+        // Pressed again: what was marked goes, and the mode goes with it. With
+        // nothing marked this is only a way out.
+        if (store.removeItems(openList, doomed) > 0) save();
+        leaveBinMode();
+      }
+      requestUpdate();
       return;
 
     case todoui::ActionAddItem:
@@ -152,6 +180,11 @@ void TodoActivity::handle(const freeink::ui::ActionEvent& event) {
     default:
       return;
   }
+}
+
+void TodoActivity::leaveBinMode() {
+  binning = false;
+  doomed.clear();
 }
 
 void TodoActivity::showMenu(const int list) {
@@ -302,9 +335,14 @@ void TodoActivity::render(RenderLock&&) {
     shoutedTitle[n] = '\0';
 
     todoui::ItemRow rows[todoui::kMaxRowsOnPage];
+    // The marks are only as long as the list was when bin mode opened; an item
+    // added meanwhile cannot happen (ADD ITEM is disabled), but a shorter
+    // vector is still not read past its end.
     for (int i = 0; i < onPage; ++i) {
-      rows[i].text = list.items[first + i].text.c_str();
-      rows[i].complete = list.items[first + i].complete;
+      const size_t index = static_cast<size_t>(first + i);
+      rows[i].text = list.items[index].text.c_str();
+      rows[i].complete = list.items[index].complete;
+      rows[i].doomed = binning && index < doomed.size() && doomed[index];
       rows[i].value = static_cast<int16_t>(first + i);
     }
     todoui::ItemsModel model;
@@ -313,6 +351,7 @@ void TodoActivity::render(RenderLock&&) {
     model.count = onPage > 0 ? onPage : 0;
     model.complete = todo::isComplete(list);
     model.empty = list.items.empty();
+    model.binning = binning;
     model.page = itemsPage;
     model.pageCount = pageCount;
     todoui::buildItems(screen, model);

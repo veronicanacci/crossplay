@@ -98,6 +98,11 @@ struct Store {
   // The new item's index, or -1, on the same terms as addList.
   int addItem(int list, const std::string& text);
   bool toggleItem(int list, int item);
+  // Removes every item whose flag in `doomed` is set, by index; flags past the
+  // end are ignored. Returns how many went. Bin mode on the list screen ends
+  // here: the marks are kept on the screen while the user chooses, and only
+  // this call touches the list.
+  int removeItems(int list, const std::vector<bool>& doomed);
 
   bool validList(int index) const { return index >= 0 && index < static_cast<int>(lists.size()); }
 };
