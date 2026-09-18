@@ -1,0 +1,368 @@
+#include "TodoActivity.h"
+
+#include <HalStorage.h>
+#include <Logging.h>
+#include <Memory.h>
+
+#include <variant>
+#include <vector>
+
+#include "../../activities/util/KeyboardEntryActivity.h"
+#include "../../components/UITheme.h"
+#include "../Shelf.h"
+#include "../ui/ToyboxFonts.h"
+#include "../ui/ToyboxTheme.h"
+#include "TodoScreens.h"
+
+namespace {
+
+constexpr const char* kLog = "TODO";
+
+}  // namespace
+
+std::unique_ptr<Activity> TodoActivity::create(GfxRenderer& renderer, MappedInputManager& mappedInput) {
+  // Never a bare new: the firmware is built -fno-exceptions, so a failed
+  // allocation aborts rather than throwing.
+  return makeUniqueNoThrow<TodoActivity>(renderer, mappedInput);
+}
+
+void TodoActivity::load() {
+  store.lists.clear();
+  if (!Storage.exists(todo::kSavePath)) {
+    LOG_INF(kLog, "No %s; starting with no lists", todo::kSavePath);
+    return;
+  }
+  const String text = Storage.readFile(todo::kSavePath);
+  todo::decode(std::string(text.c_str()), store.lists);
+  LOG_INF(kLog, "%d lists from %s", static_cast<int>(store.lists.size()), todo::kSavePath);
+}
+
+void TodoActivity::save() {
+  const std::string text = todo::encode(store.lists);
+  if (!Storage.writeFile(todo::kSavePath, String(text.c_str()))) {
+    LOG_ERR(kLog, "Could not write %s; the lists are only in RAM until the next save", todo::kSavePath);
+  }
+}
+
+void TodoActivity::onEnter() {
+  Activity::onEnter();
+  toybox::ensureFonts(renderer);
+  load();
+  requestUpdate();
+}
+
+void TodoActivity::page(const int delta) {
+  int& current = view == View::Lists ? listsPage : itemsPage;
+  const int next = todo::pageStep(current, pageCount, delta);
+  if (next == current) return;
+  current = next;
+  requestUpdate();
+}
+
+void TodoActivity::loop() {
+  namespace fui = freeink::ui;
+
+  // The menu owns every input while it is up, including Back, which closes it.
+  if (menu.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+
+  // Back walks up: a list to the lists, the lists to wherever the shelf says.
+  // leave() is the one place that knows which folder that is. On the X4 Pro
+  // this is also the left-edge swipe, which MappedInputManager folds into the
+  // same release.
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    if (view == View::Items && binning) {
+      // Back out of bin mode first, forgetting the marks: nothing was removed
+      // and nothing will be.
+      leaveBinMode();
+      requestUpdate();
+    } else if (view == View::Items) {
+      view = View::Lists;
+      openList = -1;
+      requestUpdate();
+    } else {
+      shelf::leave(renderer, mappedInput);
+    }
+    return;
+  }
+
+  // The two side keys and a vertical swipe page the rows, the way the shelf's
+  // folders and the Hacker News front page do.
+  const MappedInputManager::SwipeDir swipe = mappedInput.wasSwipe();
+  const bool next =
+      mappedInput.wasReleased(MappedInputManager::Button::Down) || swipe == MappedInputManager::SwipeDir::Up;
+  const bool prev =
+      mappedInput.wasReleased(MappedInputManager::Button::Up) || swipe == MappedInputManager::SwipeDir::Down;
+  if (next || prev) {
+    page(next ? 1 : -1);
+    return;
+  }
+
+  int tapX = 0, tapY = 0;
+  if (!mappedInput.wasScreenTapped(tapX, tapY)) return;
+  if (!interactionsReady) return;
+
+  fui::InputSnapshot input;
+  input.touchReleased = true;
+  input.touchX = static_cast<int16_t>(tapX);
+  input.touchY = static_cast<int16_t>(tapY);
+  // route() gates itself on whether the panel has actually SHOWN this table, so
+  // a finger still resting where a shelf row was cannot land on a list during
+  // the refresh that replaced it.
+  const fui::ActionEvent event = interactions.route(input);
+  if (!event) return;
+  handle(event);
+}
+
+void TodoActivity::handle(const freeink::ui::ActionEvent& event) {
+  switch (event.action) {
+    case todoui::ActionOpenList:
+      if (!store.validList(event.value)) return;
+      openList = event.value;
+      view = View::Items;
+      itemsPage = 0;
+      leaveBinMode();
+      requestUpdate();
+      return;
+
+    case todoui::ActionListMenu:
+      if (!store.validList(event.value)) return;
+      showMenu(event.value);
+      requestUpdate();
+      return;
+
+    case todoui::ActionNewList:
+      openKeyboard("New list", [this](const std::string& text) {
+        const int added = store.addList(text);
+        if (added < 0) return;
+        save();
+        // Land on the page the new list is on: it joins the end of the
+        // unfinished lists, which may be below the fold. render() knows where.
+        reveal = added;
+      });
+      return;
+
+    case todoui::ActionToggleItem:
+      if (binning) {
+        // A mark, not an edit: nothing is saved until the bin is pressed.
+        if (event.value >= 0 && static_cast<size_t>(event.value) < doomed.size()) {
+          doomed[event.value] = !doomed[event.value];
+          requestUpdate();
+        }
+        return;
+      }
+      if (store.toggleItem(openList, event.value)) {
+        save();
+        requestUpdate();
+      }
+      return;
+
+    case todoui::ActionBin:
+      if (!store.validList(openList)) return;
+      if (!binning) {
+        binning = true;
+        doomed.assign(store.lists[openList].items.size(), false);
+      } else {
+        // Pressed again: what was marked goes, and the mode goes with it. With
+        // nothing marked this is only a way out.
+        if (store.removeItems(openList, doomed) > 0) save();
+        leaveBinMode();
+      }
+      requestUpdate();
+      return;
+
+    case todoui::ActionAddItem:
+      openKeyboard("Add item", [this](const std::string& text) {
+        const int added = store.addItem(openList, text);
+        if (added < 0) return;
+        save();
+        reveal = added;
+      });
+      return;
+
+    default:
+      return;
+  }
+}
+
+void TodoActivity::leaveBinMode() {
+  binning = false;
+  doomed.clear();
+}
+
+void TodoActivity::showMenu(const int list) {
+  const todo::List& target = store.lists[list];
+  const bool complete = todo::isComplete(target);
+  const char* options[3] = {
+      target.pinned ? "Unpin" : "Pin to top",
+      complete ? "Mark incomplete" : "Mark complete",
+      "Delete",
+  };
+  // Titled with the list's name, so a menu opened on the wrong row says so
+  // before anything is done to it.
+  menu.show(target.name.c_str(), options, 3, 0, [this, list, complete](const int choice) {
+    if (!store.validList(list)) return;
+    bool changed = false;
+    switch (choice) {
+      case 0:
+        changed = store.setPinned(list, !store.lists[list].pinned);
+        break;
+      case 1:
+        changed = store.markAll(list, !complete);
+        break;
+      case 2:
+        changed = store.removeList(list);
+        break;
+      default:
+        break;
+    }
+    if (changed) save();
+    requestUpdate();
+  });
+}
+
+void TodoActivity::openKeyboard(const char* title, std::function<void(const std::string&)> onText) {
+  // The device's one keyboard, the one every settings field and the OPDS search
+  // use, for one line of text. It pops itself with the text, or with
+  // isCancelled set, and the handler below runs on this activity once it has.
+  startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, std::string(title),
+                                                                 std::string(), todo::kMaxTextChars, InputType::Text),
+                         [onText](const ActivityResult& result) {
+                           if (result.isCancelled) return;
+                           // get_if, not get: the firmware is built without
+                           // exceptions, and a result of another shape is a
+                           // cancel rather than a crash.
+                           const auto* typed = std::get_if<KeyboardResult>(&result.data);
+                           if (typed == nullptr || typed->headerAction) return;
+                           onText(typed->text);
+                         });
+}
+
+void TodoActivity::render(RenderLock&&) {
+  namespace fui = freeink::ui;
+
+  // Drawn over the frame already on the panel, without clearing it, the way
+  // every popup on the device is.
+  if (menu.processRender(renderer, mappedInput)) return;
+
+  renderer.clearScreen();
+  // readingChromeFaces(): names and items are text somebody typed, so they take
+  // the reading cut, which carries the accents Jersey does not; counts,
+  // buttons and the status line are the device speaking and keep Jersey; the
+  // band keeps the shared display cut so this is the same device as the shelf.
+  fui::GfxRendererTarget target = toybox::makeTarget(renderer, toybox::readingChromeFaces());
+  const fui::DeviceContext device = target.deviceContext();
+  const fui::InputSnapshot noInput{};
+
+  interactionsReady = false;
+  toybox::Frame frame(target, device, noInput, interactions);
+  toybox::Screen screen(frame);
+
+  if (view == View::Items && !store.validList(openList)) {
+    // The list went away under us (deleted from a menu opened before the view
+    // changed, or a store reloaded shorter). Up a level rather than a blank.
+    view = View::Lists;
+    openList = -1;
+  }
+
+  // Rows are as tall as their wrapped text, so the pages are found by measuring
+  // every row with the same function the builder will draw it with, and
+  // filling pages greedily. The builder never sees a row that does not fit.
+  const fui::ThemeTokens& tokens = toybox::themeTokens();
+  std::vector<int16_t> heights;
+
+  if (view == View::Lists) {
+    const todoui::Layout box = todoui::layout(device, false);
+    const std::vector<int> order = todo::displayOrder(store.lists);
+    const int count = static_cast<int>(order.size());
+    heights.reserve(order.size());
+    for (const int index : order) {
+      const todo::List& list = store.lists[index];
+      heights.push_back(todoui::rowHeightFor(target, tokens, list.name.c_str(),
+                                             todoui::nameWidth(box.rows, list.pinned), todoui::kNameLines, true));
+    }
+    const std::vector<int> starts = todoui::pageStarts(box.rows, heights.data(), count);
+    pageCount = static_cast<int>(starts.size());
+    if (reveal >= 0) {
+      for (int i = 0; i < count; ++i) {
+        if (order[i] == reveal) listsPage = todoui::pageOf(starts, i);
+      }
+      reveal = -1;
+    }
+    listsPage = todo::pageStep(listsPage, pageCount, 0);
+    const int first = starts[listsPage];
+    const int last = listsPage + 1 < pageCount ? starts[listsPage + 1] : count;
+    const int onPage = last - first > todoui::kMaxRowsOnPage ? todoui::kMaxRowsOnPage : last - first;
+
+    todoui::ListRow rows[todoui::kMaxRowsOnPage];
+    for (int i = 0; i < onPage; ++i) {
+      const int index = order[first + i];
+      const todo::List& list = store.lists[index];
+      rows[i].name = list.name.c_str();
+      rows[i].total = static_cast<int>(list.items.size());
+      rows[i].open = todo::openCount(list);
+      rows[i].pinned = list.pinned;
+      rows[i].complete = todo::isComplete(list);
+      rows[i].value = static_cast<int16_t>(index);
+    }
+    todoui::ListsModel model;
+    model.rows = rows;
+    model.count = onPage > 0 ? onPage : 0;
+    model.page = listsPage;
+    model.pageCount = pageCount;
+    todoui::buildLists(screen, model);
+  } else {
+    const todo::List& list = store.lists[openList];
+    const todoui::Layout box = todoui::layout(device, true);
+    const int count = static_cast<int>(list.items.size());
+    heights.reserve(list.items.size());
+    const int16_t width = todoui::itemWidth(box.rows);
+    for (const todo::Item& item : list.items) {
+      heights.push_back(todoui::rowHeightFor(target, tokens, item.text.c_str(), width, todoui::kItemLines, false));
+    }
+    const std::vector<int> starts = todoui::pageStarts(box.rows, heights.data(), count);
+    pageCount = static_cast<int>(starts.size());
+    if (reveal >= 0) {
+      itemsPage = todoui::pageOf(starts, reveal);
+      reveal = -1;
+    }
+    itemsPage = todo::pageStep(itemsPage, pageCount, 0);
+    const int first = starts[itemsPage];
+    const int last = itemsPage + 1 < pageCount ? starts[itemsPage + 1] : count;
+    const int onPage = last - first > todoui::kMaxRowsOnPage ? todoui::kMaxRowsOnPage : last - first;
+
+    size_t n = 0;
+    for (const char* c = list.name.c_str(); *c != '\0' && n + 1 < sizeof(shoutedTitle); ++c, ++n) {
+      shoutedTitle[n] = *c >= 'a' && *c <= 'z' ? static_cast<char>(*c - 'a' + 'A') : *c;
+    }
+    shoutedTitle[n] = '\0';
+
+    todoui::ItemRow rows[todoui::kMaxRowsOnPage];
+    // The marks are only as long as the list was when bin mode opened; an item
+    // added meanwhile cannot happen (ADD ITEM is disabled), but a shorter
+    // vector is still not read past its end.
+    for (int i = 0; i < onPage; ++i) {
+      const size_t index = static_cast<size_t>(first + i);
+      rows[i].text = list.items[index].text.c_str();
+      rows[i].complete = list.items[index].complete;
+      rows[i].doomed = binning && index < doomed.size() && doomed[index];
+      rows[i].value = static_cast<int16_t>(first + i);
+    }
+    todoui::ItemsModel model;
+    model.title = shoutedTitle;
+    model.rows = rows;
+    model.count = onPage > 0 ? onPage : 0;
+    model.complete = todo::isComplete(list);
+    model.empty = list.items.empty();
+    model.binning = binning;
+    model.page = itemsPage;
+    model.pageCount = pageCount;
+    todoui::buildItems(screen, model);
+  }
+  interactionsReady = true;
+
+  toybox::reportOverflow(interactions, "To Do");
+
+  const auto labels = mappedInput.mapLabels("Back", "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  renderer.displayBuffer();
+}

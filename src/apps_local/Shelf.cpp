@@ -36,6 +36,8 @@
 #include "solitaire/SolitaireActivity.h"
 #include "study/StudyActivity.h"
 #include "sudoku/SudokuActivity.h"
+#include "todo/TodoActivity.h"
+#include "todo/TodoIcons.h"
 #include "toybattle/ToyBattleActivity.h"
 #include "trivia/TriviaActivity.h"
 #include "ui/ToyboxIcons.h"
@@ -86,6 +88,7 @@ constexpr shelf::Item kApps[] = {
     // not Clippy. Drawn in assets_local/clippy/, generated into
     // clippy/ClippyArt.h at the same 32px every row above uses.
     {"CLIPPY FACTS", &icon_clippy_32, &ClippyFactsActivity::create},
+    {"TO DO", &icon_todo_32, &TodoActivity::create},
 };
 
 // The two rows Home grows, in reading order. Titles are Title Case because

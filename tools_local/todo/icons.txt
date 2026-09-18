@@ -1,0 +1,23 @@
+# Icons for TO DO, generated into src/apps_local/todo/TodoIcons.h by
+# tools_local/todo/gen_todo_icons.sh. Format: alias = lucide-name, the same
+# manifest shape as tools_local/toybox/icons.txt. Kept in the app's own folder
+# rather than spliced into ToyboxIcons.h so the app adds nothing to a shared
+# generated file.
+
+# The shelf row. A list with a ticked box on it is what the app IS, and no
+# other row on either shelf is built from a list.
+todo      = list-todo
+
+# The pinned mark on a list row, beside the "..." control. Lucide's pin is a
+# thumbtack: a head, a stem and a point, three shapes that survive one bit at
+# 24px where `pin-off`'s extra diagonal does not.
+todo_pin  = pin
+
+# The "..." control at the right of every list row. Three discs, the one
+# glyph every touch UI already reads as "more actions".
+todo_more = ellipsis
+
+# The bin: the button that enters and leaves bin mode, and the mark on an item
+# chosen for removal. A plain X rather than a trash can, because the same
+# shape has to read at 24px inside a box and the can's lid and body blur there.
+todo_x    = x
