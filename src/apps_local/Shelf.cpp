@@ -30,6 +30,8 @@
 #include "knucklebones/KnucklebonesActivity.h"
 #include "minesweeper/MinesweeperActivity.h"
 #include "murdle/MurdleActivity.h"
+#include "mylibrary/LibraryActivity.h"
+#include "mylibrary/LibraryIcons.h"
 #include "picross/PicrossActivity.h"
 #include "player/PlayerActivity.h"
 #include "seasalt/SeaSaltActivity.h"
@@ -89,6 +91,7 @@ constexpr shelf::Item kApps[] = {
     // clippy/ClippyArt.h at the same 32px every row above uses.
     {"CLIPPY FACTS", &icon_clippy_32, &ClippyFactsActivity::create},
     {"TO DO", &icon_todo_32, &TodoActivity::create},
+    {"MY LIBRARY", &icon_mylibrary_32, &LibraryActivity::create},
 };
 
 // The two rows Home grows, in reading order. Titles are Title Case because

@@ -1,0 +1,14 @@
+# Icons for MY LIBRARY, generated into src/apps_local/mylibrary/LibraryIcons.h
+# by tools_local/mylibrary/gen_library_icons.sh. Format: alias = lucide-name,
+# the same manifest shape as tools_local/toybox/icons.txt. Kept in the app's own
+# folder so the app adds nothing to a shared generated file.
+
+# The shelf row: a row of books on a shelf, which is what the app is.
+mylibrary       = library-big
+
+# The favourite toggle on a book's page.
+mylibrary_heart = heart
+
+# The "..." control in a book page's band: the one glyph every touch UI already
+# reads as "more actions".
+mylibrary_more  = ellipsis
