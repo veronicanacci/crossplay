@@ -2,11 +2,18 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
 namespace library {
 
 bool isGrouped(const Browse browse) {
   return browse == Browse::Authors || browse == Browse::Genres || browse == Browse::Tags || browse == Browse::Series;
+}
+
+bool isSearch(const Browse browse) {
+  return browse == Browse::SearchTitle || browse == Browse::SearchAuthor || browse == Browse::SearchIsbn;
 }
 
 namespace {
@@ -25,12 +32,6 @@ Book make(const char* title, const char* author, const char* isbn, const char* p
   b.language = language;
   b.plot = plot;
   return b;
-}
-
-std::string lowered(const std::string& text) {
-  std::string out = text;
-  for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  return out;
 }
 
 }  // namespace
@@ -135,9 +136,47 @@ const char* browseTitle(const Browse browse) {
       return "UNREAD";
     case Browse::Favourites:
       return "FAVOURITES";
+    case Browse::SearchTitle:
+      return "TITLE";
+    case Browse::SearchAuthor:
+      return "AUTHOR";
+    case Browse::SearchIsbn:
+      return "ISBN";
     case Browse::All:
     default:
       return "ALL BOOKS";
+  }
+}
+
+const char* groupsEmptyText(const Browse browse) {
+  switch (browse) {
+    case Browse::Authors:
+      return "No authors found.";
+    case Browse::Genres:
+      return "No genres found.";
+    case Browse::Tags:
+      return "No tags yet.";
+    case Browse::Series:
+      return "No series found.";
+    default:
+      return "Nothing here yet.";
+  }
+}
+
+const char* booksEmptyText(const Browse browse) {
+  switch (browse) {
+    case Browse::Favourites:
+      return "No favourites yet.";
+    case Browse::Read:
+      return "Nothing read yet.";
+    case Browse::Unread:
+      return "Nothing unread.";
+    case Browse::SearchTitle:
+    case Browse::SearchAuthor:
+    case Browse::SearchIsbn:
+      return "No matching books.";
+    default:
+      return "No books found.";
   }
 }
 
@@ -179,10 +218,18 @@ std::vector<std::string> splitTags(const std::string& text) {
 namespace {
 
 bool hasTag(const Book& book, const std::string& tag) {
+  const std::string wanted = fold(tag);
   for (const std::string& t : splitTags(book.tags)) {
-    if (t == tag) return true;
+    if (fold(t) == wanted) return true;
   }
   return false;
+}
+
+// A substring match on the folded text. An empty query matches nothing: a
+// search for nothing is not a search for everything.
+bool contains(const std::string& text, const std::string& query) {
+  if (query.empty()) return false;
+  return fold(text).find(fold(query)) != std::string::npos;
 }
 
 }  // namespace
@@ -193,19 +240,27 @@ bool matches(const Book& book, const Filter& filter) {
     case Browse::All:
       return true;
     case Browse::Authors:
-      return book.author == filter.value;
+      return fold(book.author) == fold(filter.value);
     case Browse::Genres:
-      return book.genre == filter.value;
+      return fold(book.genre) == fold(filter.value);
     case Browse::Tags:
       return hasTag(book, filter.value);
     case Browse::Series:
-      return book.series == filter.value;
+      return fold(book.series) == fold(filter.value);
     case Browse::Read:
       return book.state == ReadState::Read;
     case Browse::Unread:
       return book.state == ReadState::Unread;
     case Browse::Favourites:
       return book.favourite;
+    case Browse::SearchTitle:
+      return contains(book.title, filter.value);
+    case Browse::SearchAuthor:
+      return contains(book.author, filter.value);
+    case Browse::SearchIsbn: {
+      const std::string query = foldIsbn(filter.value);
+      return !query.empty() && foldIsbn(book.isbn).find(query) != std::string::npos;
+    }
   }
   return false;
 }
@@ -217,7 +272,7 @@ std::vector<int> select(const std::vector<Book>& books, const Filter& filter) {
     if (matches(books[i], filter)) out.push_back(static_cast<int>(i));
   }
   std::stable_sort(out.begin(), out.end(),
-                   [&books](const int a, const int b) { return lowered(books[a].title) < lowered(books[b].title); });
+                   [&books](const int a, const int b) { return fold(books[a].title) < fold(books[b].title); });
   return out;
 }
 
@@ -244,10 +299,16 @@ std::vector<std::string> groups(const std::vector<Book>& books, const Collection
     }
     for (const std::string& value : values) {
       if (value.empty()) continue;
-      if (std::find(out.begin(), out.end(), value) == out.end()) out.push_back(value);
+      // One entry per name however it is capitalised, spelt the way it was
+      // first seen.
+      const std::string key = fold(value);
+      bool seen = false;
+      for (const std::string& have : out) seen = seen || fold(have) == key;
+      if (!seen) out.push_back(value);
     }
   }
-  std::sort(out.begin(), out.end(), [](const std::string& a, const std::string& b) { return lowered(a) < lowered(b); });
+  std::stable_sort(out.begin(), out.end(),
+                   [](const std::string& a, const std::string& b) { return fold(a) < fold(b); });
   return out;
 }
 
@@ -257,6 +318,341 @@ int pageStep(const int page, const int pageCount, const int delta) {
   const int to = from + delta;
   if (to < 0) return 0;
   return to >= pageCount ? pageCount - 1 : to;
+}
+
+// ---- normalisation ----------------------------------------------------------
+
+namespace {
+
+// The base letter for U+00C0..U+017F, one character per code point, in order.
+// '1' stands for "ss" (U+00DF), '2' for "ae" (U+00C6/E6), '3' for "oe"
+// (U+0152/53), '4' for "th" (U+00DE/FE), and '.' for a code point that is not a
+// letter with a diacritic and is left alone.
+constexpr char kLatin1[64] = {
+    // U+00C0: À Á Â Ã Ä Å Æ Ç È É Ê Ë Ì Í Î Ï
+    'a',
+    'a',
+    'a',
+    'a',
+    'a',
+    'a',
+    '2',
+    'c',
+    'e',
+    'e',
+    'e',
+    'e',
+    'i',
+    'i',
+    'i',
+    'i',
+    // U+00D0: Ð Ñ Ò Ó Ô Õ Ö × Ø Ù Ú Û Ü Ý Þ ß
+    'd',
+    'n',
+    'o',
+    'o',
+    'o',
+    'o',
+    'o',
+    '.',
+    'o',
+    'u',
+    'u',
+    'u',
+    'u',
+    'y',
+    '4',
+    '1',
+    // U+00E0: à á â ã ä å æ ç è é ê ë ì í î ï
+    'a',
+    'a',
+    'a',
+    'a',
+    'a',
+    'a',
+    '2',
+    'c',
+    'e',
+    'e',
+    'e',
+    'e',
+    'i',
+    'i',
+    'i',
+    'i',
+    // U+00F0: ð ñ ò ó ô õ ö ÷ ø ù ú û ü ý þ ÿ
+    'd',
+    'n',
+    'o',
+    'o',
+    'o',
+    'o',
+    'o',
+    '.',
+    'o',
+    'u',
+    'u',
+    'u',
+    'u',
+    'y',
+    '4',
+    'y',
+};
+// U+0100..U+017F, Latin Extended-A: upper and lower alternate.
+constexpr char kLatinA[128] = {
+    'a', 'a', 'a', 'a', 'a', 'a', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'd', 'd',  // U+0100
+    'd', 'd', 'e', 'e', 'e', 'e', 'e', 'e', 'e', 'e', 'e', 'e', 'g', 'g', 'g', 'g',  // U+0110
+    'g', 'g', 'g', 'g', 'h', 'h', 'h', 'h', 'i', 'i', 'i', 'i', 'i', 'i', 'i', 'i',  // U+0120
+    'i', 'i', '.', '.', 'j', 'j', 'k', 'k', 'k', 'l', 'l', 'l', 'l', 'l', 'l', 'l',  // U+0130
+    'l', 'l', 'l', 'n', 'n', 'n', 'n', 'n', 'n', 'n', '.', '.', 'o', 'o', 'o', 'o',  // U+0140
+    'o', 'o', '3', '3', 'r', 'r', 'r', 'r', 'r', 'r', 's', 's', 's', 's', 's', 's',  // U+0150
+    's', 's', 't', 't', 't', 't', 't', 't', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u',  // U+0160
+    'u', 'u', 'u', 'u', 'w', 'w', 'y', 'y', 'y', 'z', 'z', 'z', 'z', 'z', 'z', '.',  // U+0170
+};
+
+void appendFolded(std::string& out, const char base) {
+  switch (base) {
+    case '1':
+      out += "ss";
+      return;
+    case '2':
+      out += "ae";
+      return;
+    case '3':
+      out += "oe";
+      return;
+    case '4':
+      out += "th";
+      return;
+    default:
+      out.push_back(base);
+      return;
+  }
+}
+
+}  // namespace
+
+std::string fold(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  for (size_t i = 0; i < text.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(text[i]);
+    if (c < 0x80) {
+      out.push_back(static_cast<char>(std::tolower(c)));
+      continue;
+    }
+    // A two-byte sequence in U+0080..U+07FF; the two tables cover U+00C0..U+017F.
+    if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) {
+      const unsigned char d = static_cast<unsigned char>(text[i + 1]);
+      const uint32_t cp = (static_cast<uint32_t>(c & 0x1F) << 6) | (d & 0x3F);
+      char base = '.';
+      if (cp >= 0xC0 && cp < 0x100) base = kLatin1[cp - 0xC0];
+      if (cp >= 0x100 && cp < 0x180) base = kLatinA[cp - 0x100];
+      if (base != '.') {
+        appendFolded(out, base);
+        i += 1;
+        continue;
+      }
+    }
+    out.push_back(text[i]);
+  }
+  return out;
+}
+
+std::string foldIsbn(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    if (c == ' ' || c == '-') continue;
+    out.push_back(c);
+  }
+  return out;
+}
+
+// ---- identity -----------------------------------------------------------------
+
+std::string stableId(const Book& book) {
+  const std::string isbn = foldIsbn(book.isbn);
+  if (isbn.size() == 10 || isbn.size() == 13) return "isbn:" + isbn;
+  // FNV-1a over the folded fields, separated so "ab" + "c" and "a" + "bc" differ.
+  uint64_t h = 1469598103934665603ULL;
+  const std::string* parts[4] = {&book.author, &book.title, &book.publisher, &book.year};
+  for (const std::string* part : parts) {
+    for (const char c : fold(*part)) {
+      h ^= static_cast<unsigned char>(c);
+      h *= 1099511628211ULL;
+    }
+    h ^= 0x1F;
+    h *= 1099511628211ULL;
+  }
+  char hex[24];
+  std::snprintf(hex, sizeof(hex), "meta:%08lx%08lx", static_cast<unsigned long>(h >> 32),
+                static_cast<unsigned long>(h & 0xFFFFFFFFULL));
+  return hex;
+}
+
+// ---- the personal state file ------------------------------------------------
+
+namespace {
+
+constexpr char kPersonalHeader[] = "# CrossPlay MY LIBRARY personal v1";
+
+std::string escaped(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    if (c == '\\') {
+      out += "\\\\";
+    } else if (c == '\t') {
+      out += "\\t";
+    } else if (c == '\n') {
+      out += "\\n";
+    } else if (c != '\r') {
+      out.push_back(c);
+    }
+  }
+  return out;
+}
+
+std::string unescaped(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  for (size_t i = 0; i < text.size(); ++i) {
+    if (text[i] != '\\' || i + 1 >= text.size()) {
+      out.push_back(text[i]);
+      continue;
+    }
+    const char next = text[++i];
+    if (next == 't') {
+      out.push_back('\t');
+    } else if (next == 'n') {
+      out.push_back('\n');
+    } else {
+      out.push_back(next);
+    }
+  }
+  return out;
+}
+
+const char* collectionWord(const Collection collection) {
+  return collection == Collection::Wishlist ? "wishlist" : "mybooks";
+}
+
+const char* stateWord(const ReadState state) {
+  return state == ReadState::Read ? "read" : (state == ReadState::Dnf ? "dnf" : "unread");
+}
+
+void appendRecord(std::string& out, const PersonalRecord& record) {
+  out += escaped(record.id);
+  out.push_back('\t');
+  out += collectionWord(record.collection);
+  out.push_back('\t');
+  out += stateWord(record.state);
+  out.push_back('\t');
+  out.push_back(static_cast<char>('0' + clampRating(record.rating)));
+  out.push_back('\t');
+  out.push_back(record.favourite ? '1' : '0');
+  out.push_back('\t');
+  out.push_back(record.deleted ? '1' : '0');
+  out.push_back('\t');
+  out += escaped(record.tags);
+  out.push_back('\t');
+  out += escaped(record.location);
+  out.push_back('\t');
+  out += escaped(record.notes);
+  out.push_back('\n');
+}
+
+std::vector<std::string> splitTabs(const std::string& line) {
+  std::vector<std::string> fields;
+  size_t start = 0;
+  while (start <= line.size()) {
+    size_t end = line.find('\t', start);
+    if (end == std::string::npos) end = line.size();
+    fields.push_back(line.substr(start, end - start));
+    start = end + 1;
+  }
+  return fields;
+}
+
+}  // namespace
+
+PersonalRecord personalOf(const Book& book) {
+  PersonalRecord record;
+  record.id = stableId(book);
+  record.collection = book.collection;
+  record.state = book.state;
+  record.rating = book.rating;
+  record.favourite = book.favourite;
+  record.deleted = book.deleted;
+  record.tags = book.tags;
+  record.location = book.location;
+  record.notes = book.notes;
+  return record;
+}
+
+void applyPersonal(const PersonalRecord& record, Book& book) {
+  book.collection = record.collection;
+  book.state = record.state;
+  book.rating = clampRating(record.rating);
+  book.favourite = record.favourite;
+  book.deleted = record.deleted;
+  book.tags = record.tags;
+  book.location = record.location;
+  book.notes = record.notes;
+}
+
+std::string encodePersonal(const std::vector<Book>& books, const std::vector<PersonalRecord>& others) {
+  std::string out = kPersonalHeader;
+  out.push_back('\n');
+  for (const Book& book : books) appendRecord(out, personalOf(book));
+  for (const PersonalRecord& record : others) appendRecord(out, record);
+  return out;
+}
+
+void decodePersonal(const std::string& text, std::vector<PersonalRecord>& out) {
+  out.clear();
+  size_t start = 0;
+  while (start < text.size()) {
+    size_t end = text.find('\n', start);
+    if (end == std::string::npos) end = text.size();
+    std::string line = text.substr(start, end - start);
+    start = end + 1;
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (line.empty() || line[0] == '#') continue;
+    const std::vector<std::string> fields = splitTabs(line);
+    // Nine fields today; a shorter line from an older writer keeps what it has,
+    // and a longer one from a newer writer loses only what this reader does not
+    // know.
+    if (fields.size() < 6 || fields[0].empty()) continue;
+    PersonalRecord record;
+    record.id = unescaped(fields[0]);
+    record.collection = fields[1] == "wishlist" ? Collection::Wishlist : Collection::MyBooks;
+    record.state = fields[2] == "read" ? ReadState::Read : (fields[2] == "dnf" ? ReadState::Dnf : ReadState::Unread);
+    record.rating = clampRating(std::atoi(fields[3].c_str()));
+    record.favourite = fields[4] == "1";
+    record.deleted = fields[5] == "1";
+    if (fields.size() > 6) record.tags = unescaped(fields[6]);
+    if (fields.size() > 7) record.location = unescaped(fields[7]);
+    if (fields.size() > 8) record.notes = unescaped(fields[8]);
+    out.push_back(record);
+  }
+}
+
+void loadPersonal(const std::vector<PersonalRecord>& records, std::vector<Book>& books,
+                  std::vector<PersonalRecord>& others) {
+  others.clear();
+  for (const PersonalRecord& record : records) {
+    bool placed = false;
+    for (Book& book : books) {
+      if (stableId(book) == record.id) {
+        applyPersonal(record, book);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) others.push_back(record);
+  }
 }
 
 }  // namespace library

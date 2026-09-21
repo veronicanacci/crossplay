@@ -1,5 +1,7 @@
 #include "LibraryActivity.h"
 
+#include <HalStorage.h>
+#include <Logging.h>
 #include <Memory.h>
 
 #include <cstdio>
@@ -16,11 +18,20 @@
 namespace fui = freeink::ui;
 
 namespace {
+
+constexpr const char* kLog = "LIBR";
+
 constexpr size_t kTagChars = 120;
 constexpr size_t kNoteChars = 200;
+constexpr size_t kLocationChars = 60;
+constexpr size_t kQueryChars = 48;
 
 // The home screen's two rows.
 constexpr const char* kHomeRows[] = {"MY BOOKS", "WISHLIST"};
+// The search screen's three rows, and the mode each one searches.
+constexpr const char* kSearchRows[] = {"TITLE", "AUTHOR", "ISBN"};
+constexpr library::Browse kSearchModes[] = {library::Browse::SearchTitle, library::Browse::SearchAuthor,
+                                            library::Browse::SearchIsbn};
 
 }  // namespace
 
@@ -34,9 +45,48 @@ void LibraryActivity::onEnter() {
   Activity::onEnter();
   toybox::ensureFonts(renderer);
   books = library::sampleBooks();
+  load();
   stack.clear();
   stack.push_back(View{});
   requestUpdate();
+}
+
+void LibraryActivity::load() {
+  others.clear();
+  if (!Storage.exists(library::kPersonalPath)) {
+    LOG_INF(kLog, "No %s; every book starts as the fixture has it", library::kPersonalPath);
+    return;
+  }
+  const String text = Storage.readFile(library::kPersonalPath);
+  std::vector<library::PersonalRecord> records;
+  library::decodePersonal(std::string(text.c_str()), records);
+  library::loadPersonal(records, books, others);
+  LOG_INF(kLog, "%d personal records from %s, %d for books not here", static_cast<int>(records.size()),
+          library::kPersonalPath, static_cast<int>(others.size()));
+}
+
+void LibraryActivity::save() {
+  const std::string text = library::encodePersonal(books, others);
+  if (!Storage.writeFile(library::kPersonalPath, String(text.c_str()))) {
+    LOG_ERR(kLog, "Could not write %s; personal state is only in RAM until the next save", library::kPersonalPath);
+  }
+}
+
+void LibraryActivity::search(const library::Browse browse) {
+  const library::Collection collection = top().filter.collection;
+  char title[32];
+  std::snprintf(title, sizeof(title), "Search %s", library::browseTitle(browse));
+  openKeyboard(title, std::string(), kQueryChars, [this, browse, collection](const std::string& text) {
+    // Nothing typed is nothing searched: the keyboard closes and the search
+    // screen is still there.
+    if (library::fold(text).find_first_not_of(' ') == std::string::npos) return;
+    View next;
+    next.kind = Kind::Books;
+    next.filter.collection = collection;
+    next.filter.browse = browse;
+    next.filter.value = text;
+    push(next);
+  });
 }
 
 void LibraryActivity::push(const View& view) {
@@ -134,6 +184,9 @@ void LibraryActivity::handle(const freeink::ui::ActionEvent& event) {
           next.kind = library::isGrouped(rows[row].browse) ? Kind::Groups : Kind::Books;
         }
         push(next);
+      } else if (view.kind == Kind::Search) {
+        if (row < 0 || row > 2) return;
+        search(kSearchModes[row]);
       } else if (view.kind == Kind::Groups) {
         if (row < 0 || row >= static_cast<int>(groupNames.size())) return;
         View next;
@@ -167,6 +220,7 @@ void LibraryActivity::handle(const freeink::ui::ActionEvent& event) {
     case libraryui::ActionHeart:
       if (view.kind != Kind::Detail) return;
       books[view.book].favourite = !books[view.book].favourite;
+      save();
       requestUpdate();
       return;
 
@@ -197,6 +251,7 @@ void LibraryActivity::openPending() {
         } else if (choice == 1) {
           // Only the collection changes: every other personal field stays.
           books[index].collection = owned ? library::Collection::Wishlist : library::Collection::MyBooks;
+          save();
         } else if (choice == 2) {
           pending = Pending::ConfirmDelete;
         }
@@ -218,6 +273,7 @@ void LibraryActivity::openPending() {
       options.push_back(book.favourite ? "Remove from favourites" : "Add to favourites");
       options.push_back("Tags");
       options.push_back("Notes");
+      if (owned) options.push_back("Location");
       // Rows after the two My Books-only ones shift in the wishlist, so a choice
       // is read back by its label rather than its number.
       const std::vector<std::string> labels = options;
@@ -243,19 +299,32 @@ void LibraryActivity::openPending() {
                     pending = Pending::EditTags;
                   } else if (label == "Notes") {
                     pending = Pending::EditNotes;
+                  } else if (label == "Location") {
+                    pending = Pending::EditLocation;
                   }
+                  save();
                   requestUpdate();
                 });
       break;
     }
 
     case Pending::EditTags:
-      openKeyboard("Tags (semicolon separated)", book.tags, kTagChars,
-                   [this, index](const std::string& text) { books[index].tags = text; });
+      openKeyboard("Tags (semicolon separated)", book.tags, kTagChars, [this, index](const std::string& text) {
+        books[index].tags = text;
+        save();
+      });
       return;
     case Pending::EditNotes:
-      openKeyboard("Notes", book.notes, kNoteChars,
-                   [this, index](const std::string& text) { books[index].notes = text; });
+      openKeyboard("Notes", book.notes, kNoteChars, [this, index](const std::string& text) {
+        books[index].notes = text;
+        save();
+      });
+      return;
+    case Pending::EditLocation:
+      openKeyboard("Location", book.location, kLocationChars, [this, index](const std::string& text) {
+        books[index].location = text;
+        save();
+      });
       return;
 
     case Pending::RatingMenu: {
@@ -263,6 +332,7 @@ void LibraryActivity::openPending() {
                                 library::ratingText(3), library::ratingText(4), library::ratingText(5)};
       menu.show("Rating", options, 6, library::clampRating(book.rating), [this, index](const int choice) {
         books[index].rating = library::clampRating(choice);
+        save();
         requestUpdate();
       });
       break;
@@ -275,6 +345,7 @@ void LibraryActivity::openPending() {
           // A tombstone, not an erasure: the book stays in the table so a later
           // import cannot bring it back.
           books[index].deleted = true;
+          save();
           if (stack.size() > 1) stack.pop_back();
         }
         requestUpdate();
@@ -316,6 +387,13 @@ void LibraryActivity::renderMenu(toybox::Screen& screen, View& view) {
       item.label = label;
       items.push_back(item);
     }
+  } else if (view.kind == Kind::Search) {
+    model.title = "SEARCH";
+    for (const char* label : kSearchRows) {
+      fui::ListItem item;
+      item.label = label;
+      items.push_back(item);
+    }
   } else if (view.kind == Kind::Collection) {
     model.title = library::collectionTitle(view.filter.collection);
     for (const Row& row : collectionRows()) {
@@ -326,7 +404,7 @@ void LibraryActivity::renderMenu(toybox::Screen& screen, View& view) {
   } else {
     model.title = library::browseTitle(view.filter.browse);
     model.reading = true;
-    model.empty = libraryui::kNoGroups;
+    model.empty = library::groupsEmptyText(view.filter.browse);
     groupNames = library::groups(books, view.filter.collection, view.filter.browse);
     groupCounts.reserve(groupNames.size());
     for (const std::string& name : groupNames) {
@@ -388,7 +466,7 @@ void LibraryActivity::renderBooks(toybox::Screen& screen, View& view) {
 
   // The caption: the browse and, for a grouped one, the value picked.
   char caption[160];
-  if (library::isGrouped(view.filter.browse)) {
+  if (library::isGrouped(view.filter.browse) || library::isSearch(view.filter.browse)) {
     std::snprintf(caption, sizeof(caption), "%s: %s", library::browseTitle(view.filter.browse),
                   view.filter.value.c_str());
   } else if (count == 1) {
@@ -403,6 +481,7 @@ void LibraryActivity::renderBooks(toybox::Screen& screen, View& view) {
   model.rows = rowModels;
   model.count = onPage > 0 ? onPage : 0;
   model.empty = count == 0;
+  model.emptyText = library::booksEmptyText(view.filter.browse);
   model.page = view.page;
   model.pageCount = view.pageCount;
   libraryui::buildBookList(screen, model);
@@ -466,6 +545,7 @@ void LibraryActivity::render(RenderLock&&) {
   switch (view.kind) {
     case Kind::Home:
     case Kind::Collection:
+    case Kind::Search:
     case Kind::Groups:
       renderMenu(screen, view);
       break;
@@ -474,9 +554,6 @@ void LibraryActivity::render(RenderLock&&) {
       break;
     case Kind::Detail:
       renderDetail(screen, view);
-      break;
-    case Kind::Search:
-      libraryui::buildNotice(screen, "SEARCH", libraryui::kSearchSoon);
       break;
   }
   interactionsReady = true;

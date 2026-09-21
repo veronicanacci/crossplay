@@ -4,7 +4,8 @@
 //
 // One activity, a stack of views: home, a collection, a group list, a book
 // list, one book. Back pops the stack; an empty stack is the shelf's turn.
-// Milestone 1 keeps the library in memory and seeds it from sampleBooks().
+// The bibliographic fields come from sampleBooks(); the personal state is read
+// from the card on entry and written back after every change to it.
 
 #include <functional>
 #include <memory>
@@ -43,9 +44,16 @@ class LibraryActivity final : public Activity {
   // What a popup asked for, done in loop() once the popup has closed: a popup's
   // callback runs inside the popup, and opening another one from there would
   // replace the callback while it is still running.
-  enum class Pending { None, MainMenu, EditMenu, RatingMenu, ConfirmDelete, EditTags, EditNotes };
+  enum class Pending { None, MainMenu, EditMenu, RatingMenu, ConfirmDelete, EditTags, EditNotes, EditLocation };
 
   View& top() { return stack.back(); }
+  // The personal state file, read once on entry and written after every
+  // change to a personal field. The bibliographic fields never go through it.
+  void load();
+  void save();
+  // Opens the keyboard for a search in `browse` (one of the three search
+  // modes) and pushes the results when something was typed.
+  void search(library::Browse browse);
   void push(const View& view);
   void handle(const freeink::ui::ActionEvent& event);
   void page(int delta);
@@ -66,6 +74,9 @@ class LibraryActivity final : public Activity {
   void renderDetail(toybox::Screen& screen, View& view);
 
   std::vector<library::Book> books;
+  // Records in the personal file for books this library does not have, kept
+  // and written back so a book that comes back finds its state waiting.
+  std::vector<library::PersonalRecord> others;
   std::vector<View> stack;
   // Scratch the models borrow for the length of a build. Members rather than
   // locals because render() runs on an 8 KB stack.

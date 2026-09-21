@@ -15,7 +15,6 @@ namespace libraryui {
 const char* const kTitle = "MY LIBRARY";
 const char* const kNoBooks = "No books here.";
 const char* const kNoGroups = "Nothing here yet.";
-const char* const kSearchSoon = "Coming in milestone 2.";
 const char* const kInfo = "INFO";
 const char* const kSummary = "SUMMARY";
 
@@ -207,7 +206,7 @@ void buildBookList(toybox::Screen& screen, const BookListModel& model) {
 
   const fui::Rect rows = bookRows(screen.device());
   if (model.empty) {
-    emptyState(screen, rows, kNoBooks);
+    emptyState(screen, rows, model.emptyText != nullptr ? model.emptyText : kNoBooks);
     return;
   }
   const int count = model.count > kMaxRowsOnPage ? kMaxRowsOnPage : model.count;
@@ -452,11 +451,6 @@ DetailPaging buildDetail(toybox::Screen& screen, const DetailModel& model) {
     screen.target().text(fui::makeRect(0, toybox::bandCenterY(screen, proseLh), right, proseLh), counter, style);
   }
   return paging;
-}
-
-void buildNotice(toybox::Screen& screen, const char* title, const char* words) {
-  chrome(screen, title, 0, 1);
-  emptyState(screen, menuBand(screen.device()), words);
 }
 
 }  // namespace libraryui

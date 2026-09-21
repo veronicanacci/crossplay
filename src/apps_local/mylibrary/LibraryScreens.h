@@ -28,12 +28,11 @@ enum : fui::ActionId {
 };
 
 // The words on the screens, named so tests can ask for them by name.
-extern const char* const kTitle;       // "MY LIBRARY"
-extern const char* const kNoBooks;     // the empty book list
-extern const char* const kNoGroups;    // an empty authors/genres/tags/series list
-extern const char* const kSearchSoon;  // the search placeholder
-extern const char* const kInfo;        // the foot label of a book page's first section
-extern const char* const kSummary;     // and of its second
+extern const char* const kTitle;     // "MY LIBRARY"
+extern const char* const kNoBooks;   // the empty book list
+extern const char* const kNoGroups;  // an empty authors/genres/tags/series list
+extern const char* const kInfo;      // the foot label of a book page's first section
+extern const char* const kSummary;   // and of its second
 
 // A menu: the band, and rows of the theme's list. `items` is the current page's
 // slice, so items[0] is the top row; the caller pages with menuRowsPerPage().
@@ -69,6 +68,8 @@ struct BookListModel {
   const BookRow* rows = nullptr;
   int count = 0;
   bool empty = false;  // the whole list, not just this page
+  // What to say when it is; kNoBooks when left unset.
+  const char* emptyText = nullptr;
   int page = 0;
   int pageCount = 1;
 };
@@ -132,8 +133,5 @@ struct DetailPaging {
   int page = 0;
 };
 DetailPaging buildDetail(toybox::Screen& screen, const DetailModel& model);
-
-// A band and one centred sentence: the search placeholder.
-void buildNotice(toybox::Screen& screen, const char* title, const char* words);
 
 }  // namespace libraryui

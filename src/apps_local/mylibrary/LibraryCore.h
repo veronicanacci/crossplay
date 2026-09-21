@@ -47,12 +47,27 @@ struct Book {
   bool deleted = false;
 };
 
-// The ways into a book list from a collection screen.
-enum class Browse : uint8_t { All, Authors, Genres, Tags, Series, Read, Unread, Favourites };
+// The ways into a book list from a collection screen. The last three are the
+// search modes: only the named field is searched, and `Filter::value` is the
+// typed query.
+enum class Browse : uint8_t {
+  All,
+  Authors,
+  Genres,
+  Tags,
+  Series,
+  Read,
+  Unread,
+  Favourites,
+  SearchTitle,
+  SearchAuthor,
+  SearchIsbn,
+};
 
 // Authors, Genres, Tags and Series are grouped: they show a list of values
 // first and the books for one value second. The rest go straight to books.
 bool isGrouped(Browse browse);
+bool isSearch(Browse browse);
 
 // Which books a list shows. `value` is the group picked, for a grouped browse.
 struct Filter {
@@ -66,6 +81,10 @@ std::vector<Book> sampleBooks();
 
 const char* collectionTitle(Collection collection);  // "MY BOOKS" / "WISHLIST"
 const char* browseTitle(Browse browse);              // "ALL BOOKS", "AUTHORS", ...
+// What an empty screen says: for the list of values a grouped browse offers,
+// and for a list of books.
+const char* groupsEmptyText(Browse browse);
+const char* booksEmptyText(Browse browse);
 
 // 0 to 5, anything else pinned to the nearer end.
 int clampRating(int rating);
@@ -92,5 +111,73 @@ std::vector<std::string> groups(const std::vector<Book>& books, Collection colle
 
 // `page` moved by `delta`, stopping at both ends.
 int pageStep(int page, int pageCount, int delta);
+
+// ---- normalisation ----------------------------------------------------------
+
+// The text as it is compared: ASCII lowercased, and the Latin letters with
+// diacritics (U+00C0 to U+017F) folded to their base letters, so "suskind"
+// finds Süskind and "zafon" finds Zafón. Everything else passes through
+// unchanged. A table of two hundred code points rather than a Unicode
+// library, because that is every accent a library of Latin-script books has.
+std::string fold(const std::string& text);
+
+// An ISBN as it is compared: spaces and hyphens removed, so 978-0-14 and
+// 978 0 14 and 9780 14 are the same prefix. Nothing else is touched; a partial
+// query is a substring of this.
+std::string foldIsbn(const std::string& text);
+
+// ---- identity -----------------------------------------------------------------
+
+// The key personal state is filed under. "isbn:" and the folded ISBN when the
+// book has one of the right length; otherwise "meta:" and a hash of the folded
+// author, title, publisher and year, which is the same for the same book
+// exported twice and is what lets a later import find its personal state.
+std::string stableId(const Book& book);
+
+// ---- the personal state file ------------------------------------------------
+
+// Beside the reader's own state and every game's save, so clearing
+// `.crosspoint/` clears this too. Personal state only: the bibliographic
+// fields come from elsewhere (sampleBooks() today, an import later) and a
+// refresh of them must not touch this file.
+constexpr char kPersonalPath[] = "/.crosspoint/mylibrary-personal.tsv";
+
+// One book's personal state, keyed by stableId(). What the file holds, one
+// record a line, and what a record for a book the library no longer has is
+// kept as, so a book that comes back finds its state waiting.
+struct PersonalRecord {
+  std::string id;
+  Collection collection = Collection::MyBooks;
+  ReadState state = ReadState::Unread;
+  int rating = 0;
+  bool favourite = false;
+  bool deleted = false;
+  std::string tags;
+  std::string location;
+  std::string notes;
+};
+
+PersonalRecord personalOf(const Book& book);
+// Copies a record's fields onto a book. The id is not checked here.
+void applyPersonal(const PersonalRecord& record, Book& book);
+
+// The file: a version line, then one tab-separated record a line:
+//
+//     # CrossPlay MY LIBRARY personal v1
+//     id  collection  state  rating  favourite  deleted  tags  location  notes
+//
+// Tabs, newlines and backslashes inside a text field are written as \\t, \\n
+// and \\\\, so a record is always one line. `others` are records for books
+// not in `books`, written back unchanged.
+std::string encodePersonal(const std::vector<Book>& books, const std::vector<PersonalRecord>& others);
+
+// Reads what it can and skips what it cannot: a line that is not a record,
+// a record with no id, a field it does not understand. Never fails; a
+// damaged file costs its damaged lines. `out` is replaced.
+void decodePersonal(const std::string& text, std::vector<PersonalRecord>& out);
+
+// Puts every record onto the book it is for; the rest come back in `others`.
+void loadPersonal(const std::vector<PersonalRecord>& records, std::vector<Book>& books,
+                  std::vector<PersonalRecord>& others);
 
 }  // namespace library
