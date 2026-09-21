@@ -32,10 +32,8 @@ extern const char* const kTitle;       // "MY LIBRARY"
 extern const char* const kNoBooks;     // the empty book list
 extern const char* const kNoGroups;    // an empty authors/genres/tags/series list
 extern const char* const kSearchSoon;  // the search placeholder
-extern const char* const kRead;
-extern const char* const kUnread;
-extern const char* const kInfo;     // the foot label of a book page's first section
-extern const char* const kSummary;  // and of its second
+extern const char* const kInfo;        // the foot label of a book page's first section
+extern const char* const kSummary;     // and of its second
 
 // A menu: the band, and rows of the theme's list. `items` is the current page's
 // slice, so items[0] is the top row; the caller pages with menuRowsPerPage().
@@ -109,8 +107,8 @@ struct DetailModel {
   // Personal state. `showRead` is false in the wishlist, where a book cannot
   // have been read yet and the line is not drawn.
   bool showRead = false;
-  bool read = false;
-  const char* rating = "";  // as library::ratingText gives it
+  const char* readState = "";  // as library::readStateText gives it
+  const char* rating = "";     // as library::ratingText gives it
   bool favourite = false;
   const char* tags = "";
   const char* notes = "";

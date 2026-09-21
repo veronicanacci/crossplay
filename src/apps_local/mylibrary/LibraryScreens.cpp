@@ -16,8 +16,6 @@ const char* const kTitle = "MY LIBRARY";
 const char* const kNoBooks = "No books here.";
 const char* const kNoGroups = "Nothing here yet.";
 const char* const kSearchSoon = "Coming in milestone 2.";
-const char* const kRead = "Read";
-const char* const kUnread = "Unread";
 const char* const kInfo = "INFO";
 const char* const kSummary = "SUMMARY";
 
@@ -249,6 +247,8 @@ void buildBookList(toybox::Screen& screen, const BookListModel& model) {
 namespace {
 
 constexpr int16_t kHeartBox = toybox::kIconSize + 12;
+// How many lines a field's value may take before it is cut.
+constexpr int kFieldLines = 3;
 constexpr int16_t kHeartGlyph = 24;
 constexpr uint8_t kHeartRadius = 6;
 
@@ -258,17 +258,24 @@ int16_t field(toybox::Screen& screen, const int16_t x, const int16_t y, const in
               const char* value) {
   if (value == nullptr || *value == '\0') return 0;
   const fui::TextStyle bold = boldStyle(screen.theme(), 1);
-  const fui::TextStyle prose = proseStyle(screen.theme(), 1);
+  const fui::TextStyle prose = proseStyle(screen.theme(), kFieldLines);
   const int16_t lh = screen.target().lineHeight(bold.font);
+  const int16_t proseLh = screen.target().lineHeight(prose.font);
   const int16_t labelW = static_cast<int16_t>(screen.target().measureText(bold.font, label, bold).width);
   screen.target().text(fui::makeRect(x, y, labelW, lh), label, bold);
   const int16_t valueX = static_cast<int16_t>(x + labelW + toybox::kGutter);
   const int16_t valueW = static_cast<int16_t>(x + width - valueX);
-  if (valueW > 0) {
-    const std::string fitted = toybox::fitLines(screen.target(), value, valueW, 1, prose);
-    screen.target().text(fui::makeRect(valueX, y, valueW, lh), fitted.c_str(), prose);
-  }
-  return lh;
+  if (valueW <= 0) return lh;
+  // A long value wraps in the column beside its label rather than being cut:
+  // a series name is the whole point of the line, and one ending in an
+  // ellipsis says nothing. The first line sits on the label's line box; the
+  // rest follow at the reading cut's own pitch.
+  const FittedText fitted = fit(screen.target(), value, valueW, prose);
+  fui::TextStyle style = prose;
+  style.maxLines = static_cast<uint8_t>(fitted.lines);
+  const int16_t valueH = static_cast<int16_t>(fitted.lines == 1 ? lh : lh + proseLh * (fitted.lines - 1));
+  screen.target().text(fui::makeRect(valueX, y, valueW, valueH), fitted.text.c_str(), style);
+  return valueH;
 }
 
 void heart(toybox::Screen& screen, const bool favourite) {
@@ -331,7 +338,7 @@ DetailPaging buildDetail(toybox::Screen& screen, const DetailModel& model) {
   };
   char personal[64] = {};
   if (model.showRead) {
-    std::snprintf(personal, sizeof(personal), "%s, %s", model.read ? kRead : kUnread, model.rating);
+    std::snprintf(personal, sizeof(personal), "%s, %s", model.readState, model.rating);
   }
   const Line fields[] = {
       {"ISBN", model.isbn},         {"Publisher", model.publisher}, {"Year", model.year},

@@ -208,7 +208,11 @@ void LibraryActivity::openPending() {
     case Pending::EditMenu: {
       std::vector<std::string> options;
       if (owned) {
-        options.push_back(book.read ? "Mark as unread" : "Mark as read");
+        // The two states the book is not in. "Mark as" what it already is
+        // would be a row that does nothing.
+        if (book.state != library::ReadState::Read) options.push_back("Mark as read");
+        if (book.state != library::ReadState::Unread) options.push_back("Mark as unread");
+        if (book.state != library::ReadState::Dnf) options.push_back("Mark as DNF");
         options.push_back(std::string("Rating: ") + library::ratingText(book.rating));
       }
       options.push_back(book.favourite ? "Remove from favourites" : "Add to favourites");
@@ -225,8 +229,12 @@ void LibraryActivity::openPending() {
                   if (choice < 0 || choice >= static_cast<int>(labels.size())) return;
                   const std::string& label = labels[choice];
                   library::Book& b = books[index];
-                  if (label.rfind("Mark as", 0) == 0) {
-                    b.read = !b.read;
+                  if (label == "Mark as read") {
+                    b.state = library::ReadState::Read;
+                  } else if (label == "Mark as unread") {
+                    b.state = library::ReadState::Unread;
+                  } else if (label == "Mark as DNF") {
+                    b.state = library::ReadState::Dnf;
                   } else if (label.rfind("Rating", 0) == 0) {
                     pending = Pending::RatingMenu;
                   } else if (label.find("favourites") != std::string::npos) {
@@ -415,7 +423,7 @@ void LibraryActivity::renderDetail(toybox::Screen& screen, View& view) {
   model.language = book.language.c_str();
   model.plot = book.plot.c_str();
   model.showRead = book.collection == library::Collection::MyBooks;
-  model.read = book.read;
+  model.readState = library::readStateText(book.state);
   model.rating = library::ratingText(book.rating);
   model.favourite = book.favourite;
   model.tags = book.tags.c_str();

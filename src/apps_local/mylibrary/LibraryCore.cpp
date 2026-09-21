@@ -44,7 +44,7 @@ std::vector<Book> sampleBooks() {
            "In 1327 the Franciscan friar William of Baskerville and his novice Adso arrive at a wealthy Italian "
            "abbey where a series of deaths is unsettling the monks. The trail leads through a labyrinthine "
            "library and a forbidden book.");
-  b.read = true;
+  b.state = ReadState::Read;
   b.rating = 5;
   b.favourite = true;
   b.tags = "italy; monks; labyrinth";
@@ -56,7 +56,7 @@ std::vector<Book> sampleBooks() {
            "260", "English",
            "You are about to begin reading Italo Calvino's new novel. Ten incipits, each interrupted, and a reader who "
            "keeps trying to finish a book.");
-  b.read = true;
+  b.state = ReadState::Read;
   b.rating = 4;
   b.tags = "italy; metafiction";
   b.location = "Bedroom shelf 2";
@@ -71,7 +71,7 @@ std::vector<Book> sampleBooks() {
   b = make("Perfume", "Patrick Süskind", "9780140120837", "Penguin", "1986", "Horror", "", "263", "English",
            "Jean-Baptiste Grenouille is born with a perfect sense of smell and no scent of his own. In eighteenth "
            "century France he sets out to distil the one perfume that will make him loved.");
-  b.read = true;
+  b.state = ReadState::Read;
   b.rating = 3;
   b.tags = "gothic; weird little man";
   b.location = "Living room bookcase";
@@ -91,6 +91,7 @@ std::vector<Book> sampleBooks() {
 
   b = make("Dune Messiah", "Frank Herbert", "9780441172696", "Ace", "1969", "Science Fiction", "Dune", "256", "English",
            "");
+  b.state = ReadState::Dnf;
   b.location = "Storage box";
   books.push_back(b);
 
@@ -147,6 +148,18 @@ const char* ratingText(const int rating) {
   return kTexts[clampRating(rating)];
 }
 
+const char* readStateText(const ReadState state) {
+  switch (state) {
+    case ReadState::Read:
+      return "Read";
+    case ReadState::Dnf:
+      return "DNF";
+    case ReadState::Unread:
+    default:
+      return "Unread";
+  }
+}
+
 std::vector<std::string> splitTags(const std::string& text) {
   std::vector<std::string> out;
   size_t start = 0;
@@ -188,9 +201,9 @@ bool matches(const Book& book, const Filter& filter) {
     case Browse::Series:
       return book.series == filter.value;
     case Browse::Read:
-      return book.read;
+      return book.state == ReadState::Read;
     case Browse::Unread:
-      return !book.read;
+      return book.state == ReadState::Unread;
     case Browse::Favourites:
       return book.favourite;
   }

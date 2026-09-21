@@ -15,6 +15,10 @@ namespace library {
 
 enum class Collection : uint8_t { MyBooks, Wishlist };
 
+// Whether a book has been read. Three states rather than a flag: a book put
+// down for good is neither read nor waiting to be.
+enum class ReadState : uint8_t { Unread, Read, Dnf };
+
 struct Book {
   // Imported (bibliographic) metadata. BookBuddy's to fill; any field may be
   // empty and every screen has to cope with that.
@@ -33,7 +37,7 @@ struct Book {
   // reading a book does not rate it, favouriting does not read it, moving it
   // between collections changes nothing but the collection.
   Collection collection = Collection::MyBooks;
-  bool read = false;
+  ReadState state = ReadState::Unread;
   int rating = 0;  // 0 = not rated, 1..5
   bool favourite = false;
   std::string tags;  // as typed: "gothic; horror"
@@ -67,6 +71,10 @@ const char* browseTitle(Browse browse);              // "ALL BOOKS", "AUTHORS", 
 int clampRating(int rating);
 // "Not rated" for 0, otherwise one asterisk per point.
 const char* ratingText(int rating);
+// "Unread", "Read" or "DNF".
+const char* readStateText(ReadState state);
+// "Unread", "Read" or "DNF".
+const char* readStateText(ReadState state);
 
 // "gothic; horror ; ;italy" -> {"gothic", "horror", "italy"}: split on
 // semicolons, whitespace trimmed, empties dropped.
