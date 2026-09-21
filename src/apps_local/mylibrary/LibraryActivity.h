@@ -33,16 +33,17 @@ class LibraryActivity final : public Activity {
 
   struct View {
     Kind kind = Kind::Home;
-    library::Filter filter;  // the collection, and for Groups/Books the browse and its value
-    int page = 0;            // menu or list page; the plot's first line on a Detail
-    int book = -1;           // the library index, on a Detail
-    int pageCount = 1;       // counted by render(), read by loop() to page
+    library::Filter filter;    // the collection, and for Groups/Books the browse and its value
+    int page = 0;              // menu or list page; the plot's first line on a Detail
+    int book = -1;             // the library index, on a Detail
+    bool plotSection = false;  // on a Detail: SUMMARY rather than INFO below the title block
+    int pageCount = 1;         // counted by render(), read by loop() to page
   };
 
   // What a popup asked for, done in loop() once the popup has closed: a popup's
   // callback runs inside the popup, and opening another one from there would
   // replace the callback while it is still running.
-  enum class Pending { None, MainMenu, EditMenu, RatingMenu, ConfirmDelete, EditTags, EditNotes, EditLocation };
+  enum class Pending { None, MainMenu, EditMenu, RatingMenu, ConfirmDelete, EditTags, EditNotes };
 
   View& top() { return stack.back(); }
   void push(const View& view);

@@ -12,3 +12,7 @@ mylibrary_heart = heart
 # The "..." control in a book page's band: the one glyph every touch UI already
 # reads as "more actions".
 mylibrary_more  = ellipsis
+
+# The arrows at the foot of a book page, between its INFO and SUMMARY sections.
+mylibrary_prev  = chevron-left
+mylibrary_next  = chevron-right

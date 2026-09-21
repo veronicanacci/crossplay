@@ -18,7 +18,6 @@ namespace fui = freeink::ui;
 namespace {
 constexpr size_t kTagChars = 120;
 constexpr size_t kNoteChars = 200;
-constexpr size_t kLocationChars = 60;
 
 // The home screen's two rows.
 constexpr const char* kHomeRows[] = {"MY BOOKS", "WISHLIST"};
@@ -156,6 +155,15 @@ void LibraryActivity::handle(const freeink::ui::ActionEvent& event) {
       return;
     }
 
+    case libraryui::ActionSwitchSection:
+      if (view.kind != Kind::Detail) return;
+      // Two sections, so either arrow lands on the other; the summary starts
+      // from its first page each time it is opened.
+      view.plotSection = !view.plotSection;
+      view.page = 0;
+      requestUpdate();
+      return;
+
     case libraryui::ActionHeart:
       if (view.kind != Kind::Detail) return;
       books[view.book].favourite = !books[view.book].favourite;
@@ -206,7 +214,6 @@ void LibraryActivity::openPending() {
       options.push_back(book.favourite ? "Remove from favourites" : "Add to favourites");
       options.push_back("Tags");
       options.push_back("Notes");
-      if (owned) options.push_back("Location");
       // Rows after the two My Books-only ones shift in the wishlist, so a choice
       // is read back by its label rather than its number.
       const std::vector<std::string> labels = options;
@@ -228,8 +235,6 @@ void LibraryActivity::openPending() {
                     pending = Pending::EditTags;
                   } else if (label == "Notes") {
                     pending = Pending::EditNotes;
-                  } else if (label == "Location") {
-                    pending = Pending::EditLocation;
                   }
                   requestUpdate();
                 });
@@ -243,10 +248,6 @@ void LibraryActivity::openPending() {
     case Pending::EditNotes:
       openKeyboard("Notes", book.notes, kNoteChars,
                    [this, index](const std::string& text) { books[index].notes = text; });
-      return;
-    case Pending::EditLocation:
-      openKeyboard("Location", book.location, kLocationChars,
-                   [this, index](const std::string& text) { books[index].location = text; });
       return;
 
     case Pending::RatingMenu: {
@@ -419,7 +420,7 @@ void LibraryActivity::renderDetail(toybox::Screen& screen, View& view) {
   model.favourite = book.favourite;
   model.tags = book.tags.c_str();
   model.notes = book.notes.c_str();
-  model.location = book.location.c_str();
+  model.showPlot = view.plotSection;
 
   // The plot pages by whole screens of lines; `page` holds the page number and
   // the builder pins it to what the plot really has.

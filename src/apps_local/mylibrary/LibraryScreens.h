@@ -22,6 +22,9 @@ enum : fui::ActionId {
   ActionOpenBook = 2,  // a book row; value is the book's index in the library
   ActionMore = 3,      // the "..." chip in a book page's band
   ActionHeart = 4,     // the favourite toggle on a book page
+  // The arrows at the foot of a book page; value is -1 or +1. With two
+  // sections both land on the other one.
+  ActionSwitchSection = 5,
 };
 
 // The words on the screens, named so tests can ask for them by name.
@@ -31,6 +34,8 @@ extern const char* const kNoGroups;    // an empty authors/genres/tags/series li
 extern const char* const kSearchSoon;  // the search placeholder
 extern const char* const kRead;
 extern const char* const kUnread;
+extern const char* const kInfo;     // the foot label of a book page's first section
+extern const char* const kSummary;  // and of its second
 
 // A menu: the band, and rows of the theme's list. `items` is the current page's
 // slice, so items[0] is the top row; the caller pages with menuRowsPerPage().
@@ -109,7 +114,9 @@ struct DetailModel {
   bool favourite = false;
   const char* tags = "";
   const char* notes = "";
-  const char* location = "";
+  // Which of the two sections under the title block is showing: the fields
+  // (INFO) or the plot (SUMMARY). The arrows at the foot switch them.
+  bool showPlot = false;
   // Which screenful of the summary to show, for a plot longer than the room
   // left. Pinned to the last page when it asks for one past the end.
   int plotPage = 0;

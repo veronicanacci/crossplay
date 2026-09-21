@@ -18,6 +18,8 @@ const char* const kNoGroups = "Nothing here yet.";
 const char* const kSearchSoon = "Coming in milestone 2.";
 const char* const kRead = "Read";
 const char* const kUnread = "Unread";
+const char* const kInfo = "INFO";
+const char* const kSummary = "SUMMARY";
 
 namespace {
 
@@ -310,21 +312,19 @@ DetailPaging buildDetail(toybox::Screen& screen, const DetailModel& model) {
   header.trailingStyles = toybox::bandFilledStyles();
   header.trailingRadius = toybox::kPillRadius / 2;
 
-  // The plot's paging is only known once the fields above it are laid out, so
-  // the band is drawn with a placeholder count and the counter added after.
+  // The summary's paging is only known once the block above it is laid out, so
+  // the band is drawn without a counter and the counter added after.
   const int16_t x = toybox::kMargin;
   const int16_t width = static_cast<int16_t>(screen.device().width - 2 * toybox::kMargin);
   const fui::Rect heartBox = heartRect(screen.device());
   const int16_t titleW = static_cast<int16_t>(heartBox.x - toybox::kGutter - x);
 
-  // Measured first so the counter can be right; drawn in the same order below.
   const fui::TextStyle bold = boldStyle(screen.theme(), 3);
   const fui::TextStyle prose = proseStyle(screen.theme());
   const int16_t boldLh = screen.target().lineHeight(bold.font);
   const int16_t proseLh = screen.target().lineHeight(prose.font);
   const FittedText title = fit(screen.target(), model.title, titleW, bold);
 
-  // Everything above the summary, as a height, so the summary knows its room.
   struct Line {
     const char* label;
     const char* value;
@@ -336,8 +336,7 @@ DetailPaging buildDetail(toybox::Screen& screen, const DetailModel& model) {
   const Line fields[] = {
       {"ISBN", model.isbn},         {"Publisher", model.publisher}, {"Year", model.year},
       {"Genre", model.genre},       {"Series", model.series},       {"Pages", model.pages},
-      {"Language", model.language}, {"Tags", model.tags},           {"Location", model.location},
-      {"Notes", model.notes},
+      {"Language", model.language}, {"Tags", model.tags},           {"Notes", model.notes},
   };
 
   chrome(screen, model.band, 0, 1, header);
@@ -364,18 +363,48 @@ DetailPaging buildDetail(toybox::Screen& screen, const DetailModel& model) {
   screen.target().fill(fui::makeRect(x, y, width, toybox::kHairline), fui::Paint::solid(fui::Color::Black));
   y = static_cast<int16_t>(y + toybox::kHairline + toybox::kGutter);
 
-  for (const Line& line : fields) {
-    y = static_cast<int16_t>(y + field(screen, x, y, width, line.label, line.value));
+  // The foot: an arrow at each end, black slabs like every other button on the
+  // device, and the name of the section between them. Two sections, so both
+  // arrows go to the other one; two rather than one because a single control
+  // that toggles reads as a state, and a pair reads as a place you can leave.
+  const int16_t footY = static_cast<int16_t>(screen.device().height - toybox::kMargin - toybox::kPillHeight);
+  const fui::Rect prevRect = fui::makeRect(x, footY, toybox::kPillHeight, toybox::kPillHeight);
+  const fui::Rect nextRect = fui::makeRect(static_cast<int16_t>(x + width - toybox::kPillHeight), footY,
+                                           toybox::kPillHeight, toybox::kPillHeight);
+  fui::ButtonProps prev;
+  prev.action = ActionSwitchSection;
+  prev.value = -1;
+  prev.icon = fui::bitmapFromIcon(icon_mylibrary_prev_24);
+  screen.button(prev, prevRect);
+  fui::ButtonProps next;
+  next.action = ActionSwitchSection;
+  next.value = 1;
+  next.icon = fui::bitmapFromIcon(icon_mylibrary_next_24);
+  screen.button(next, nextRect);
+  fui::TextStyle sectionStyle = boldStyle(screen.theme(), 1);
+  sectionStyle.align = fui::TextAlign::Center;
+  const int16_t labelX = static_cast<int16_t>(prevRect.right() + toybox::kGutter);
+  screen.target().text(
+      fui::makeRect(labelX, footY, static_cast<int16_t>(nextRect.x - toybox::kGutter - labelX), toybox::kPillHeight),
+      model.showPlot ? kSummary : kInfo, sectionStyle);
+
+  // Two gutters above the foot: a filled slab directly under a line of text
+  // reads as part of it.
+  const int16_t bottom = static_cast<int16_t>(footY - toybox::kGutter * 2);
+  const fui::Rect section = fui::makeRect(x, y, width, static_cast<int16_t>(bottom > y ? bottom - y : 0));
+  if (section.height <= 0) return paging;
+
+  if (!model.showPlot) {
+    // INFO: the fields that have a value, one a line, stopping at the foot.
+    for (const Line& line : fields) {
+      const int16_t lh = screen.target().lineHeight(bold.font);
+      if (y + lh > section.bottom()) break;
+      y = static_cast<int16_t>(y + field(screen, x, y, width, line.label, line.value));
+    }
+    return paging;
   }
 
-  y = static_cast<int16_t>(y + toybox::kGutter);
-  screen.target().fill(fui::makeRect(x, y, width, toybox::kHairline), fui::Paint::solid(fui::Color::Black));
-  y = static_cast<int16_t>(y + toybox::kHairline + toybox::kGutter);
-
-  const int16_t bottom = static_cast<int16_t>(screen.device().height - toybox::kMargin);
-  const fui::Rect plotRect = fui::makeRect(x, y, width, static_cast<int16_t>(bottom > y ? bottom - y : 0));
-  if (plotRect.height <= 0) return paging;
-
+  const fui::Rect plotRect = section;
   if (model.plot == nullptr || *model.plot == '\0') {
     // No summary: the shrug, at twice its pixel size so it reads at 220ppi, in
     // the middle of the room.
