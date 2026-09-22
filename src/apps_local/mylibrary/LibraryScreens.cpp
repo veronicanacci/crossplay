@@ -453,4 +453,31 @@ DetailPaging buildDetail(toybox::Screen& screen, const DetailModel& model) {
   return paging;
 }
 
+// ---- reports ------------------------------------------------------------------
+
+void buildReport(toybox::Screen& screen, const ReportModel& model) {
+  chrome(screen, model.title, 0, 1);
+  const int16_t x = toybox::kMargin;
+  const int16_t width = static_cast<int16_t>(screen.device().width - 2 * toybox::kMargin);
+  int16_t bottom = static_cast<int16_t>(screen.device().height - toybox::kMargin);
+  if (model.action != nullptr) {
+    // The pill on the margin, the shape every other foot action on the device
+    // has; Jersey for the label, because a button is the device speaking.
+    const int16_t footY = static_cast<int16_t>(bottom - toybox::kPillHeight);
+    fui::ButtonProps pill;
+    pill.label = model.action;
+    pill.action = ActionConfirm;
+    pill.text = toybox::buttonText(screen.theme());
+    screen.button(pill, fui::makeRect(x, footY, width, toybox::kPillHeight));
+    bottom = static_cast<int16_t>(footY - toybox::kGutter * 2);
+  }
+  const fui::TextStyle prose = proseStyle(screen.theme());
+  fui::TextAreaProps area;
+  area.text = model.text;
+  area.style = prose;
+  area.showCaret = false;
+  fui::textArea(screen.frame(),
+                fui::makeRect(x, toybox::kBodyTop, width, static_cast<int16_t>(bottom - toybox::kBodyTop)), area);
+}
+
 }  // namespace libraryui

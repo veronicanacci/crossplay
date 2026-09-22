@@ -25,6 +25,7 @@ enum : fui::ActionId {
   // The arrows at the foot of a book page; value is -1 or +1. With two
   // sections both land on the other one.
   ActionSwitchSection = 5,
+  ActionConfirm = 6,  // the pill at the foot of a report: do the update it describes
 };
 
 // The words on the screens, named so tests can ask for them by name.
@@ -133,5 +134,16 @@ struct DetailPaging {
   int page = 0;
 };
 DetailPaging buildDetail(toybox::Screen& screen, const DetailModel& model);
+
+// A report: the band, a block of lines under it, and, when there is something
+// to do about them, a pill at the foot. The update previews, their results and
+// their errors are all this screen with different words.
+struct ReportModel {
+  const char* title = "";
+  const char* text = "";         // lines separated by newlines
+  const char* action = nullptr;  // the pill's label; no pill when null
+};
+
+void buildReport(toybox::Screen& screen, const ReportModel& model);
 
 }  // namespace libraryui

@@ -136,11 +136,14 @@ std::string stableId(const Book& book);
 
 // ---- the personal state file ------------------------------------------------
 
-// Beside the reader's own state and every game's save, so clearing
-// `.crosspoint/` clears this too. Personal state only: the bibliographic
-// fields come from elsewhere (sampleBooks() today, an import later) and a
-// refresh of them must not touch this file.
-constexpr char kPersonalPath[] = "/.crosspoint/mylibrary-personal.tsv";
+// The personal layer, under /library/ beside the imports and the database
+// (see LibraryUpdate.h for the whole tree). Personal state only: the
+// bibliographic fields come from the database or, before there is one, from
+// sampleBooks(), and a refresh of them never touches this file. The second
+// path is where the file lived before /library/ existed; it is read once and
+// rewritten at the first.
+constexpr char kPersonalPath[] = "/library/state/personal.tsv";
+constexpr char kLegacyPersonalPath[] = "/.crosspoint/mylibrary-personal.tsv";
 
 // One book's personal state, keyed by stableId(). What the file holds, one
 // record a line, and what a record for a book the library no longer has is

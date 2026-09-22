@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <Memory.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <variant>
 
@@ -26,8 +27,15 @@ constexpr size_t kNoteChars = 200;
 constexpr size_t kLocationChars = 60;
 constexpr size_t kQueryChars = 48;
 
-// The home screen's two rows.
-constexpr const char* kHomeRows[] = {"MY BOOKS", "WISHLIST"};
+// The home screen's rows, and the update screen's.
+constexpr const char* kHomeRows[] = {"MY BOOKS", "WISHLIST", "UPDATE LIBRARY"};
+constexpr const char* kUpdateRows[] = {"QUICK UPDATE", "COMPLETE UPDATE"};
+constexpr const char* kImportPill = "IMPORT";
+constexpr const char* kUpdatePill = "UPDATE";
+constexpr const char* kQuickTitle = "QUICK UPDATE";
+constexpr const char* kCompleteTitle = "COMPLETE UPDATE";
+constexpr const char* kDoneTitle = "UPDATED";
+constexpr const char* kUnreadable = "Could not read BookBuddy export.";
 // The search screen's three rows, and the mode each one searches.
 constexpr const char* kSearchRows[] = {"TITLE", "AUTHOR", "ISBN"};
 constexpr library::Browse kSearchModes[] = {library::Browse::SearchTitle, library::Browse::SearchAuthor,
@@ -44,7 +52,26 @@ std::unique_ptr<Activity> LibraryActivity::create(GfxRenderer& renderer, MappedI
 void LibraryActivity::onEnter() {
   Activity::onEnter();
   toybox::ensureFonts(renderer);
-  books = library::sampleBooks();
+  // The tree the updates read from and write to, made so the folders are
+  // there to drop files into before the first update ever runs.
+  for (const char* dir : {library::kLibraryDir, library::kImportsDir, library::kFullDir, library::kQuickDir,
+                          library::kProcessedDir, library::kDatabaseDir, library::kStateDir}) {
+    Storage.ensureDirectoryExists(dir);
+  }
+  books.clear();
+  if (Storage.exists(library::kDatabasePath)) {
+    const String text = Storage.readFile(library::kDatabasePath);
+    if (!library::decodeDatabase(std::string(text.c_str()), books)) {
+      LOG_ERR(kLog, "%s is not a library database; starting from the fixture", library::kDatabasePath);
+      books.clear();
+    } else {
+      LOG_INF(kLog, "%d books from %s", static_cast<int>(books.size()), library::kDatabasePath);
+    }
+  }
+  // Before the first complete update there is no database, and the fixture
+  // stands in for one so the screens have something to show.
+  fromFixture = books.empty();
+  if (fromFixture) books = library::sampleBooks();
   load();
   stack.clear();
   stack.push_back(View{});
@@ -53,16 +80,25 @@ void LibraryActivity::onEnter() {
 
 void LibraryActivity::load() {
   others.clear();
-  if (!Storage.exists(library::kPersonalPath)) {
-    LOG_INF(kLog, "No %s; every book starts as the fixture has it", library::kPersonalPath);
-    return;
+  // The file moved under /library/ with the database; one written at the old
+  // path is read from there once and rewritten at the new one.
+  const char* path = library::kPersonalPath;
+  bool migrate = false;
+  if (!Storage.exists(path)) {
+    if (!Storage.exists(library::kLegacyPersonalPath)) {
+      LOG_INF(kLog, "No %s; every book starts as its source has it", path);
+      return;
+    }
+    path = library::kLegacyPersonalPath;
+    migrate = true;
   }
-  const String text = Storage.readFile(library::kPersonalPath);
+  const String text = Storage.readFile(path);
   std::vector<library::PersonalRecord> records;
   library::decodePersonal(std::string(text.c_str()), records);
   library::loadPersonal(records, books, others);
-  LOG_INF(kLog, "%d personal records from %s, %d for books not here", static_cast<int>(records.size()),
-          library::kPersonalPath, static_cast<int>(others.size()));
+  LOG_INF(kLog, "%d personal records from %s, %d for books not here", static_cast<int>(records.size()), path,
+          static_cast<int>(others.size()));
+  if (migrate) save();
 }
 
 void LibraryActivity::save() {
@@ -70,6 +106,220 @@ void LibraryActivity::save() {
   if (!Storage.writeFile(library::kPersonalPath, String(text.c_str()))) {
     LOG_ERR(kLog, "Could not write %s; personal state is only in RAM until the next save", library::kPersonalPath);
   }
+}
+
+bool LibraryActivity::saveDatabase() {
+  // Whole file to a temporary name, then the rename, so the old library is
+  // on the card until the new one is all there.
+  const std::string temp = std::string(library::kDatabasePath) + ".tmp";
+  const std::string text = library::encodeDatabase(books);
+  if (!Storage.writeFile(temp.c_str(), String(text.c_str()))) {
+    LOG_ERR(kLog, "Could not write %s", temp.c_str());
+    return false;
+  }
+  if (Storage.exists(library::kDatabasePath)) Storage.remove(library::kDatabasePath);
+  if (!Storage.rename(temp.c_str(), library::kDatabasePath)) {
+    LOG_ERR(kLog, "Could not rename %s into place", temp.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool LibraryActivity::readExport(const std::string& path, bookbuddy::ParseResult& out) {
+  if (!Storage.exists(path.c_str())) return false;
+  const String text = Storage.readFile(path.c_str());
+  out = bookbuddy::parse(std::string(text.c_str()));
+  if (out.invalid) LOG_ERR(kLog, "%s: %s", path.c_str(), out.error.c_str());
+  return !out.invalid;
+}
+
+void LibraryActivity::scanQuick() {
+  quickFiles.clear();
+  for (const String& name : Storage.listFiles(library::kQuickDir)) {
+    const std::string file(name.c_str());
+    if (!bookbuddy::isTsvName(file)) continue;
+    QuickFile entry;
+    entry.name = file;
+    bookbuddy::ParseResult parsed;
+    if (readExport(std::string(library::kQuickDir) + "/" + file, parsed)) {
+      char count[toybox::kIntChars + 8];
+      std::snprintf(count, sizeof(count), parsed.books.size() == 1 ? "%d book" : "%d books",
+                    static_cast<int>(parsed.books.size()));
+      entry.count = count;
+      entry.readable = !parsed.books.empty();
+    } else {
+      entry.count = "unreadable";
+    }
+    quickFiles.push_back(entry);
+  }
+  std::sort(quickFiles.begin(), quickFiles.end(),
+            [](const QuickFile& a, const QuickFile& b) { return library::fold(a.name) < library::fold(b.name); });
+}
+
+void LibraryActivity::showReport(const char* title, const std::string& text, const Confirm confirm) {
+  View report;
+  report.kind = Kind::Report;
+  report.title = title;
+  report.text = text;
+  report.confirm = confirm;
+  push(report);
+}
+
+namespace {
+
+std::string counted(const int n, const char* one, const char* many) {
+  char line[toybox::kIntChars + 64];
+  std::snprintf(line, sizeof(line), "%d %s", n, n == 1 ? one : many);
+  return line;
+}
+
+std::string totals(const library::UpdateReport& report) {
+  char line[2 * toybox::kIntChars + 32];
+  std::snprintf(line, sizeof(line), "My Books: %d\nWishlist: %d\n", report.myBooks, report.wishlist);
+  return line;
+}
+
+}  // namespace
+
+void LibraryActivity::quickPreview(const int file, const library::Collection destination) {
+  if (file < 0 || file >= static_cast<int>(quickFiles.size())) return;
+  bookbuddy::ParseResult parsed;
+  const std::string name = quickFiles[file].name;
+  if (!readExport(std::string(library::kQuickDir) + "/" + name, parsed) || parsed.books.empty()) {
+    showReport(kQuickTitle, name + "\n\n" + kUnreadable + "\n" + parsed.error);
+    return;
+  }
+  const library::UpdateReport what = library::previewQuick(books, parsed.books);
+  std::string text = name + "\n" + counted(what.found, "book found", "books found") + "\n\n";
+  text += counted(what.added, "new", "new") + "\n";
+  text += counted(what.refreshed, "already in library", "already in library") + "\n";
+  if (what.suppressed > 0)
+    text += counted(what.suppressed, "deleted book stays deleted", "deleted books stay deleted") + "\n";
+  if (parsed.skipped > 0) text += counted(parsed.skipped, "line skipped", "lines skipped") + "\n";
+  text += "\nAdd to: ";
+  text += destination == library::Collection::Wishlist ? "Wishlist" : "My Books";
+  text += "\n\nBooks already here keep their collection and personal data; only their details are refreshed.";
+  View report;
+  report.kind = Kind::Report;
+  report.title = kQuickTitle;
+  report.text = text;
+  report.confirm = Confirm::Quick;
+  report.file = file;
+  report.destination = destination;
+  push(report);
+}
+
+void LibraryActivity::quickImport(View& view) {
+  if (view.file < 0 || view.file >= static_cast<int>(quickFiles.size())) return;
+  const std::string name = quickFiles[view.file].name;
+  const std::string path = std::string(library::kQuickDir) + "/" + name;
+  bookbuddy::ParseResult parsed;
+  if (!readExport(path, parsed) || parsed.books.empty()) {
+    view.title = kQuickTitle;
+    view.text = name + "\n\n" + kUnreadable;
+    view.confirm = Confirm::None;
+    return;
+  }
+  // Into a copy, and the copy becomes the library only once it is on the card.
+  // The fixture is a placeholder, not a library: the first update starts from
+  // nothing rather than carrying nine sample books into the real one.
+  std::vector<library::Book> next = fromFixture ? std::vector<library::Book>() : books;
+  const library::UpdateReport done = library::applyQuick(next, parsed.books, view.destination);
+  books.swap(next);
+  if (!saveDatabase()) {
+    books.swap(next);
+    view.title = kQuickTitle;
+    view.text = "Could not write the library file.\nNothing was changed.";
+    view.confirm = Confirm::None;
+    return;
+  }
+  fromFixture = false;
+  save();
+  // Out of the way of the next scan, name kept, so the file is still there to
+  // look at. A failed move only means it is offered again.
+  const std::string moved = std::string(library::kProcessedDir) + "/" + name;
+  if (Storage.exists(moved.c_str())) Storage.remove(moved.c_str());
+  if (!Storage.rename(path.c_str(), moved.c_str())) LOG_ERR(kLog, "Could not move %s to processed", path.c_str());
+  std::string text = counted(done.added, "book added", "books added") + "\n";
+  text += counted(done.refreshed, "record refreshed", "records refreshed") + "\n";
+  if (done.suppressed > 0) text += counted(done.suppressed, "deleted book ignored", "deleted books ignored") + "\n";
+  text += "0 duplicates created\n\n" + totals(done);
+  view.title = kDoneTitle;
+  view.text = text;
+  view.confirm = Confirm::None;
+  scanQuick();
+}
+
+void LibraryActivity::completePreview() {
+  const std::string libraryPath = std::string(library::kFullDir) + "/" + library::kFullLibraryFile;
+  const std::string wishlistPath = std::string(library::kFullDir) + "/" + library::kFullWishlistFile;
+  std::string missing;
+  if (!Storage.exists(libraryPath.c_str())) missing += "Missing " + libraryPath + "\n";
+  if (!Storage.exists(wishlistPath.c_str())) missing += "Missing " + wishlistPath + "\n";
+  if (!missing.empty()) {
+    showReport(kCompleteTitle, missing + "\nBoth full exports are needed. Nothing was changed.");
+    return;
+  }
+  bookbuddy::ParseResult mine;
+  bookbuddy::ParseResult wish;
+  if (!readExport(libraryPath, mine) || !readExport(wishlistPath, wish)) {
+    showReport(kCompleteTitle, std::string(kUnreadable) + "\n" + mine.error + wish.error + "\nNothing was changed.");
+    return;
+  }
+  // A full export with no books in it is not a library with no books in it;
+  // it is a broken file, and it wipes nothing.
+  if (mine.books.empty() && wish.books.empty()) {
+    showReport(kCompleteTitle, "The exports hold no books.\nNothing was changed.");
+    return;
+  }
+  std::string text = std::string(library::kFullLibraryFile) + ": " +
+                     counted(static_cast<int>(mine.books.size()), "book", "books") + "\n";
+  text += std::string(library::kFullWishlistFile) + ": " +
+          counted(static_cast<int>(wish.books.size()), "book", "books") + "\n";
+  if (mine.skipped + wish.skipped > 0)
+    text += counted(mine.skipped + wish.skipped, "line skipped", "lines skipped") + "\n";
+  text +=
+      "\nNew books join the collection their export names. Books already here keep their read state, rating, "
+      "favourite, tags, notes, location and collection. Deleted books stay deleted. Books the exports no longer "
+      "mention are kept.";
+  showReport(kCompleteTitle, text, Confirm::Complete);
+}
+
+void LibraryActivity::completeImport(View& view) {
+  const std::string libraryPath = std::string(library::kFullDir) + "/" + library::kFullLibraryFile;
+  const std::string wishlistPath = std::string(library::kFullDir) + "/" + library::kFullWishlistFile;
+  bookbuddy::ParseResult mine;
+  bookbuddy::ParseResult wish;
+  view.title = kCompleteTitle;
+  view.confirm = Confirm::None;
+  if (!readExport(libraryPath, mine) || !readExport(wishlistPath, wish) || (mine.books.empty() && wish.books.empty())) {
+    view.text = std::string(kUnreadable) + "\nNothing was changed.";
+    return;
+  }
+  // The fixture is a placeholder, not a library: the first update starts from
+  // nothing rather than carrying nine sample books into the real one.
+  std::vector<library::Book> next = fromFixture ? std::vector<library::Book>() : books;
+  const library::UpdateReport done = library::applyComplete(next, mine.books, wish.books);
+  books.swap(next);
+  if (!saveDatabase()) {
+    books.swap(next);
+    view.text = "Could not write the library file.\nNothing was changed.";
+    return;
+  }
+  fromFixture = false;
+  save();
+  std::string text = totals(done) + "\n";
+  text += counted(done.added, "new book", "new books") + "\n";
+  text += counted(done.refreshed, "metadata update", "metadata updates") + "\n";
+  text += counted(done.movesPreserved, "local move preserved", "local moves preserved") + "\n";
+  text += counted(done.suppressed, "deleted book suppressed", "deleted books suppressed") + "\n";
+  if (done.conflicts > 0)
+    text +=
+        counted(done.conflicts, "book in both exports, kept in My Books", "books in both exports, kept in My Books") +
+        "\n";
+  text += "\nUpdate complete.";
+  view.title = kDoneTitle;
+  view.text = text;
 }
 
 void LibraryActivity::search(const library::Browse browse) {
@@ -129,6 +379,7 @@ void LibraryActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (stack.size() > 1) {
       stack.pop_back();
+      if (top().kind == Kind::QuickFiles) scanQuick();
       requestUpdate();
     } else {
       shelf::leave(renderer, mappedInput);
@@ -167,11 +418,32 @@ void LibraryActivity::handle(const freeink::ui::ActionEvent& event) {
     case libraryui::ActionRow: {
       const int row = event.value;
       if (view.kind == Kind::Home) {
-        if (row < 0 || row > 1) return;
+        if (row < 0 || row > 2) return;
         View next;
-        next.kind = Kind::Collection;
-        next.filter.collection = row == 0 ? library::Collection::MyBooks : library::Collection::Wishlist;
+        if (row == 2) {
+          next.kind = Kind::Update;
+        } else {
+          next.kind = Kind::Collection;
+          next.filter.collection = row == 0 ? library::Collection::MyBooks : library::Collection::Wishlist;
+        }
         push(next);
+      } else if (view.kind == Kind::Update) {
+        if (row == 0) {
+          scanQuick();
+          View next;
+          next.kind = Kind::QuickFiles;
+          push(next);
+        } else if (row == 1) {
+          completePreview();
+        }
+      } else if (view.kind == Kind::QuickFiles) {
+        if (row < 0 || row >= static_cast<int>(quickFiles.size())) return;
+        if (!quickFiles[row].readable) {
+          showReport(kQuickTitle, quickFiles[row].name + "\n\n" + kUnreadable);
+          return;
+        }
+        pendingFile = row;
+        pending = Pending::QuickDestination;
       } else if (view.kind == Kind::Collection) {
         const std::vector<Row> rows = collectionRows();
         if (row < 0 || row >= static_cast<int>(rows.size())) return;
@@ -208,6 +480,16 @@ void LibraryActivity::handle(const freeink::ui::ActionEvent& event) {
       return;
     }
 
+    case libraryui::ActionConfirm:
+      if (view.kind != Kind::Report) return;
+      if (view.confirm == Confirm::Quick) {
+        quickImport(view);
+      } else if (view.confirm == Confirm::Complete) {
+        completeImport(view);
+      }
+      requestUpdate();
+      return;
+
     case libraryui::ActionSwitchSection:
       if (view.kind != Kind::Detail) return;
       // Two sections, so either arrow lands on the other; the summary starts
@@ -237,6 +519,23 @@ void LibraryActivity::handle(const freeink::ui::ActionEvent& event) {
 void LibraryActivity::openPending() {
   const Pending what = pending;
   pending = Pending::None;
+  if (what == Pending::QuickDestination) {
+    // Where the NEW books go. Mandatory, and the user's to say: BookBuddy's
+    // own wishlist flag is not consulted, and a book already here keeps the
+    // collection it has whatever is chosen.
+    const char* options[2] = {"My Books", "Wishlist"};
+    menu.show("ADD TO", options, 2, 0, [this](const int choice) {
+      pendingDestination = choice == 1 ? library::Collection::Wishlist : library::Collection::MyBooks;
+      pending = Pending::QuickPreview;
+      requestUpdate();
+    });
+    requestUpdate();
+    return;
+  }
+  if (what == Pending::QuickPreview) {
+    quickPreview(pendingFile, pendingDestination);
+    return;
+  }
   if (top().kind != Kind::Detail) return;
   const int index = top().book;
   library::Book& book = books[index];
@@ -387,6 +686,23 @@ void LibraryActivity::renderMenu(toybox::Screen& screen, View& view) {
       item.label = label;
       items.push_back(item);
     }
+  } else if (view.kind == Kind::Update) {
+    model.title = "UPDATE LIBRARY";
+    for (const char* label : kUpdateRows) {
+      fui::ListItem item;
+      item.label = label;
+      items.push_back(item);
+    }
+  } else if (view.kind == Kind::QuickFiles) {
+    model.title = kQuickTitle;
+    model.reading = true;
+    model.empty = "No files in /library/imports/quick";
+    for (const QuickFile& file : quickFiles) {
+      fui::ListItem item;
+      item.label = file.name.c_str();
+      item.value = file.count.c_str();
+      items.push_back(item);
+    }
   } else if (view.kind == Kind::Search) {
     model.title = "SEARCH";
     for (const char* label : kSearchRows) {
@@ -532,9 +848,13 @@ void LibraryActivity::render(RenderLock&&) {
   // Menus of the device's own words take Jersey, like the shelf. Anything that
   // is a book's words (names, titles, prose) takes the reading cuts: bold for
   // titles in the small slot, regular for everything else in the body slot.
-  const bool jersey = view.kind == Kind::Home || view.kind == Kind::Collection || view.kind == Kind::Search;
+  const bool jersey = view.kind == Kind::Home || view.kind == Kind::Collection || view.kind == Kind::Search ||
+                      view.kind == Kind::Update;
+  // A report is prose with a Jersey pill under it, which is readingChromeFaces.
   fui::GfxRendererTarget target =
-      toybox::makeTarget(renderer, jersey ? toybox::toyboxFaces() : toybox::readingAddressFaces());
+      toybox::makeTarget(renderer, jersey                      ? toybox::toyboxFaces()
+                                   : view.kind == Kind::Report ? toybox::readingChromeFaces()
+                                                               : toybox::readingAddressFaces());
   const fui::DeviceContext device = target.deviceContext();
   const fui::InputSnapshot noInput{};
 
@@ -546,9 +866,21 @@ void LibraryActivity::render(RenderLock&&) {
     case Kind::Home:
     case Kind::Collection:
     case Kind::Search:
+    case Kind::Update:
+    case Kind::QuickFiles:
     case Kind::Groups:
       renderMenu(screen, view);
       break;
+    case Kind::Report: {
+      libraryui::ReportModel model;
+      model.title = view.title.c_str();
+      model.text = view.text.c_str();
+      model.action = view.confirm == Confirm::Quick      ? kImportPill
+                     : view.confirm == Confirm::Complete ? kUpdatePill
+                                                         : nullptr;
+      libraryui::buildReport(screen, model);
+      break;
+    }
     case Kind::Books:
       renderBooks(screen, view);
       break;

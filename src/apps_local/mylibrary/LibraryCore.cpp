@@ -471,9 +471,29 @@ std::string foldIsbn(const std::string& text) {
 
 // ---- identity -----------------------------------------------------------------
 
+namespace {
+
+// The 13-digit form of a 10-digit ISBN: the 978 prefix, the first nine
+// digits, and a new check digit. The same book exported once with each form
+// is one book. Anything that is not ten characters of digits (with X allowed
+// as the old check digit) comes back unchanged.
+std::string isbn13Of(const std::string& isbn) {
+  if (isbn.size() != 10) return isbn;
+  for (int i = 0; i < 9; ++i) {
+    if (!std::isdigit(static_cast<unsigned char>(isbn[i]))) return isbn;
+  }
+  std::string out = "978" + isbn.substr(0, 9);
+  int sum = 0;
+  for (int i = 0; i < 12; ++i) sum += (out[i] - '0') * (i % 2 == 0 ? 1 : 3);
+  out.push_back(static_cast<char>('0' + (10 - sum % 10) % 10));
+  return out;
+}
+
+}  // namespace
+
 std::string stableId(const Book& book) {
-  const std::string isbn = foldIsbn(book.isbn);
-  if (isbn.size() == 10 || isbn.size() == 13) return "isbn:" + isbn;
+  const std::string isbn = isbn13Of(foldIsbn(book.isbn));
+  if (isbn.size() == 13) return "isbn:" + isbn;
   // FNV-1a over the folded fields, separated so "ab" + "c" and "a" + "bc" differ.
   uint64_t h = 1469598103934665603ULL;
   const std::string* parts[4] = {&book.author, &book.title, &book.publisher, &book.year};
