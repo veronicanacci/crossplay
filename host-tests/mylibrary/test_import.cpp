@@ -512,6 +512,33 @@ void testDatabaseRoundTrip() {
   CHECK(library::decodeDatabase(damaged, back) && back.size() == 2);
 }
 
+// ---- the backup ---------------------------------------------------------------
+
+void testBackupHoldsBothLayersOfEveryBook() {
+  std::vector<Book> books = libraryWith(parsed({lifeCeremony(), colourOfMagic()}));
+  books[1].collection = Collection::Wishlist;
+  books[1].state = ReadState::Read;
+  books[1].rating = 4;
+  books[1].tags = "discworld";
+  books[1].notes = "A note\twith a tab";
+  books[1].deleted = true;
+  const std::string text = library::encodeBackup(books);
+  // A header row a spreadsheet can read, then one row a book, the deleted one
+  // included and marked.
+  CHECK(text.rfind(std::string(library::kBackupColumns) + "\n", 0) == 0);
+  size_t rows = 0;
+  for (const char c : text) rows += c == '\n';
+  CHECK(rows == 3);
+  const size_t at = text.find("The Colour of Magic");
+  CHECK(at != std::string::npos);
+  const size_t start = text.rfind('\n', at) + 1;
+  const std::string row = text.substr(start, text.find('\n', at) - start);
+  CHECK(row.find("\twishlist\t1\t") != std::string::npos);            // collection, deleted
+  CHECK(row.find("\tRead\t4\t0\tdiscworld\t") != std::string::npos);  // state, rating, favourite, tags
+  CHECK(row.find("A note\\twith a tab") != std::string::npos);        // the tab escaped, so still one row
+  CHECK(row.find("9780552166591") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -532,6 +559,7 @@ int main() {
   testABookInBothExportsIsOneBook();
   testAnEmptyOrBrokenExportChangesNothing();
   testDatabaseRoundTrip();
+  testBackupHoldsBothLayersOfEveryBook();
   std::printf("mylibrary import: %d checks, %d failed\n", checks, failures);
   return failures == 0 ? 0 : 1;
 }

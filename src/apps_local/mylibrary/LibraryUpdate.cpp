@@ -243,4 +243,41 @@ bool decodeDatabase(const std::string& text, std::vector<Book>& out) {
   return true;
 }
 
+// ---- the backup ---------------------------------------------------------------
+
+const char* const kBackupColumns =
+    "id\tcollection\tdeleted\ttitle\tauthor\tisbn\tpublisher\tyear\tgenre\tseries\tpages\tlanguage\tread_state\t"
+    "rating\tfavourite\ttags\tlocation\tnotes\tsummary";
+
+std::string encodeBackup(const std::vector<Book>& books) {
+  std::string out = kBackupColumns;
+  out.push_back('\n');
+  for (const Book& book : books) {
+    out += escaped(stableId(book));
+    out.push_back('\t');
+    out += book.collection == Collection::Wishlist ? "wishlist" : "mybooks";
+    out.push_back('\t');
+    out += book.deleted ? "1" : "0";
+    const std::string* text[] = {&book.title, &book.author, &book.isbn,  &book.publisher, &book.year,
+                                 &book.genre, &book.series, &book.pages, &book.language};
+    for (const std::string* f : text) {
+      out.push_back('\t');
+      out += escaped(*f);
+    }
+    out.push_back('\t');
+    out += readStateText(book.state);
+    out.push_back('\t');
+    out.push_back(static_cast<char>('0' + clampRating(book.rating)));
+    out.push_back('\t');
+    out += book.favourite ? "1" : "0";
+    const std::string* personal[] = {&book.tags, &book.location, &book.notes, &book.plot};
+    for (const std::string* f : personal) {
+      out.push_back('\t');
+      out += escaped(*f);
+    }
+    out.push_back('\n');
+  }
+  return out;
+}
+
 }  // namespace library

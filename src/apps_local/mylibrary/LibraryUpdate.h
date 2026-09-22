@@ -29,6 +29,7 @@ namespace library {
 //     /library/imports/quick/processed/       where those go once imported
 //     /library/database/library.tsv           the bibliographic layer
 //     /library/state/personal.tsv             the personal layer
+//     /library/backup/backup-<datetime>.tsv   the whole library, both layers, as one sheet
 constexpr char kLibraryDir[] = "/library";
 constexpr char kImportsDir[] = "/library/imports";
 constexpr char kFullDir[] = "/library/imports/full";
@@ -39,6 +40,7 @@ constexpr char kProcessedDir[] = "/library/imports/quick/processed";
 constexpr char kDatabaseDir[] = "/library/database";
 constexpr char kDatabasePath[] = "/library/database/library.tsv";
 constexpr char kStateDir[] = "/library/state";  // kPersonalPath, in LibraryCore.h
+constexpr char kBackupDir[] = "/library/backup";
 
 // ---- what an update did -------------------------------------------------------
 
@@ -89,5 +91,15 @@ std::string encodeDatabase(const std::vector<Book>& books);
 // Reads what it can. `out` is replaced; a damaged line is skipped. False when
 // the text is not a database at all (no version line).
 bool decodeDatabase(const std::string& text, std::vector<Book>& out);
+
+// ---- the backup ---------------------------------------------------------------
+//
+// Everything about every book, both layers side by side, as one plain TSV a
+// spreadsheet opens: a header row naming the columns, then one row a book,
+// deleted ones included and marked, so a complete update that goes wrong can
+// be put right by hand from it. Same escaping as the other two files.
+std::string encodeBackup(const std::vector<Book>& books);
+// The header row encodeBackup writes, for tests and for anyone reading one.
+extern const char* const kBackupColumns;
 
 }  // namespace library

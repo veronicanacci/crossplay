@@ -102,6 +102,8 @@ class LibraryActivity final : public Activity {
   void quickImport(View& view);
   void completePreview();
   void completeImport(View& view);
+  // Writes the whole library to /library/backup and reports where.
+  void backup();
   void showReport(const char* title, const std::string& text, Confirm confirm = Confirm::None);
 
   struct Row {

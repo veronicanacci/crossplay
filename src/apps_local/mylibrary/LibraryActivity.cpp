@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
 #include <variant>
 
 #include "../../activities/util/KeyboardEntryActivity.h"
@@ -29,7 +30,8 @@ constexpr size_t kQueryChars = 48;
 
 // The home screen's rows, and the update screen's.
 constexpr const char* kHomeRows[] = {"MY BOOKS", "WISHLIST", "UPDATE LIBRARY"};
-constexpr const char* kUpdateRows[] = {"QUICK UPDATE", "COMPLETE UPDATE"};
+constexpr const char* kUpdateRows[] = {"QUICK UPDATE", "COMPLETE UPDATE", "BACKUP"};
+constexpr const char* kBackupTitle = "BACKUP";
 constexpr const char* kImportPill = "IMPORT";
 constexpr const char* kUpdatePill = "UPDATE";
 constexpr const char* kQuickTitle = "QUICK UPDATE";
@@ -322,6 +324,49 @@ void LibraryActivity::completeImport(View& view) {
   view.text = text;
 }
 
+void LibraryActivity::backup() {
+  Storage.ensureDirectoryExists(library::kBackupDir);
+  // Named by the clock when the device has one set; a clock still at the
+  // epoch names the file by count instead, so two backups never share a name.
+  char name[64];
+  const time_t now = time(nullptr);
+  if (now > 1600000000) {
+    struct tm parts;
+    localtime_r(&now, &parts);
+    std::snprintf(name, sizeof(name), "backup-%04d%02d%02d-%02d%02d%02d.tsv", parts.tm_year + 1900, parts.tm_mon + 1,
+                  parts.tm_mday, parts.tm_hour, parts.tm_min, parts.tm_sec);
+  } else {
+    int n = 1;
+    do {
+      std::snprintf(name, sizeof(name), "backup-%04d.tsv", n++);
+    } while (Storage.exists((std::string(library::kBackupDir) + "/" + name).c_str()) && n < 10000);
+  }
+  const std::string path = std::string(library::kBackupDir) + "/" + name;
+  const std::string text = library::encodeBackup(books);
+  if (!Storage.writeFile(path.c_str(), String(text.c_str()))) {
+    LOG_ERR(kLog, "Could not write %s", path.c_str());
+    showReport(kBackupTitle, "Could not write\n" + path + "\n\nNothing was saved.");
+    return;
+  }
+  library::UpdateReport tally;
+  int deleted = 0;
+  for (const library::Book& book : books) {
+    if (book.deleted) {
+      ++deleted;
+    } else if (book.collection == library::Collection::Wishlist) {
+      ++tally.wishlist;
+    } else {
+      ++tally.myBooks;
+    }
+  }
+  std::string report = "Saved\n" + path + "\n\n" + totals(tally);
+  report += counted(deleted, "deleted book kept for the record", "deleted books kept for the record");
+  report +=
+      "\n\nEvery book with its details and your read state, rating, favourite, tags, notes, location and collection, "
+      "as one sheet.";
+  showReport(kBackupTitle, report);
+}
+
 void LibraryActivity::search(const library::Browse browse) {
   const library::Collection collection = top().filter.collection;
   char title[32];
@@ -435,6 +480,8 @@ void LibraryActivity::handle(const freeink::ui::ActionEvent& event) {
           push(next);
         } else if (row == 1) {
           completePreview();
+        } else if (row == 2) {
+          backup();
         }
       } else if (view.kind == Kind::QuickFiles) {
         if (row < 0 || row >= static_cast<int>(quickFiles.size())) return;
