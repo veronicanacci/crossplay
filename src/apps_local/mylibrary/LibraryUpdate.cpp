@@ -206,7 +206,7 @@ std::string encodeDatabase(const std::vector<Book>& books) {
   return out;
 }
 
-bool decodeDatabase(const std::string& text, std::vector<Book>& out) {
+bool decodeDatabase(const std::string& text, std::vector<Book>& out, const bool withPlots) {
   out.clear();
   if (text.compare(0, sizeof(kDatabaseHeader) - 1, kDatabaseHeader) != 0) return false;
   size_t start = 0;
@@ -236,11 +236,26 @@ bool decodeDatabase(const std::string& text, std::vector<Book>& out) {
     book.pages = unescaped(f[8]);
     book.language = unescaped(f[9]);
     book.collection = f[10] == "wishlist" ? Collection::Wishlist : Collection::MyBooks;
-    if (f.size() > 11) book.plot = unescaped(f[11]);
+    if (withPlots && f.size() > 11) book.plot = unescaped(f[11]);
     if (book.title.empty() && book.isbn.empty()) continue;
     out.push_back(book);
   }
   return true;
+}
+
+void restorePlots(const std::string& text, std::vector<Book>& books) {
+  std::vector<Book> stored;
+  if (!decodeDatabase(text, stored, true)) return;
+  for (Book& book : books) {
+    if (!book.plot.empty()) continue;
+    const std::string id = stableId(book);
+    for (const Book& s : stored) {
+      if (!s.plot.empty() && stableId(s) == id) {
+        book.plot = s.plot;
+        break;
+      }
+    }
+  }
 }
 
 // ---- the backup ---------------------------------------------------------------

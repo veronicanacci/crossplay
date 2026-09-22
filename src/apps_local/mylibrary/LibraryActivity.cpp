@@ -43,6 +43,25 @@ constexpr const char* kSearchRows[] = {"TITLE", "AUTHOR", "ISBN"};
 constexpr library::Browse kSearchModes[] = {library::Browse::SearchTitle, library::Browse::SearchAuthor,
                                             library::Browse::SearchIsbn};
 
+// A whole file into a string, in 4 KB reads. Storage.readFile() stops at
+// 50 KB and reads a byte at a time, which was thirty-five books of a
+// 420 KB export on the device (the simulator's card has no such cap, so it
+// read all of them and nothing said). Reserved from the file's size, so a
+// large file is one allocation, which on the S3 lands in PSRAM.
+bool readWhole(const char* path, std::string& out) {
+  out.clear();
+  HalFile file;
+  if (!Storage.openFileForRead(kLog, path, file)) return false;
+  out.reserve(file.fileSize());
+  char chunk[4096];
+  for (;;) {
+    const int n = file.read(chunk, sizeof(chunk));
+    if (n <= 0) break;
+    out.append(chunk, static_cast<size_t>(n));
+  }
+  return true;
+}
+
 }  // namespace
 
 std::unique_ptr<Activity> LibraryActivity::create(GfxRenderer& renderer, MappedInputManager& mappedInput) {
@@ -62,8 +81,8 @@ void LibraryActivity::onEnter() {
   }
   books.clear();
   if (Storage.exists(library::kDatabasePath)) {
-    const String text = Storage.readFile(library::kDatabasePath);
-    if (!library::decodeDatabase(std::string(text.c_str()), books)) {
+    std::string text;
+    if (!readWhole(library::kDatabasePath, text) || !library::decodeDatabase(text, books, false)) {
       LOG_ERR(kLog, "%s is not a library database; starting from the fixture", library::kDatabasePath);
       books.clear();
     } else {
@@ -94,9 +113,13 @@ void LibraryActivity::load() {
     path = library::kLegacyPersonalPath;
     migrate = true;
   }
-  const String text = Storage.readFile(path);
+  std::string text;
+  if (!readWhole(path, text)) {
+    LOG_ERR(kLog, "%s would not open; every book starts as its source has it", path);
+    return;
+  }
   std::vector<library::PersonalRecord> records;
-  library::decodePersonal(std::string(text.c_str()), records);
+  library::decodePersonal(text, records);
   library::loadPersonal(records, books, others);
   LOG_INF(kLog, "%d personal records from %s, %d for books not here", static_cast<int>(records.size()), path,
           static_cast<int>(others.size()));
@@ -108,6 +131,34 @@ void LibraryActivity::save() {
   if (!Storage.writeFile(library::kPersonalPath, String(text.c_str()))) {
     LOG_ERR(kLog, "Could not write %s; personal state is only in RAM until the next save", library::kPersonalPath);
   }
+}
+
+const std::string& LibraryActivity::plotOf(const library::Book& book) {
+  if (!book.plot.empty()) return book.plot;
+  const std::string id = library::stableId(book);
+  if (id == plotCacheId) return plotCache;
+  plotCacheId = id;
+  plotCache.clear();
+  std::string text;
+  if (!readWhole(library::kDatabasePath, text)) return plotCache;
+  std::vector<library::Book> one;
+  one.push_back(book);
+  library::restorePlots(text, one);
+  plotCache = one[0].plot;
+  return plotCache;
+}
+
+void LibraryActivity::restorePlots(std::vector<library::Book>& into) {
+  std::string text;
+  if (Storage.exists(library::kDatabasePath) && readWhole(library::kDatabasePath, text)) {
+    library::restorePlots(text, into);
+  }
+}
+
+void LibraryActivity::dropPlots() {
+  for (library::Book& book : books) book.plot.clear();
+  plotCacheId.clear();
+  plotCache.clear();
 }
 
 bool LibraryActivity::saveDatabase() {
@@ -129,8 +180,14 @@ bool LibraryActivity::saveDatabase() {
 
 bool LibraryActivity::readExport(const std::string& path, bookbuddy::ParseResult& out) {
   if (!Storage.exists(path.c_str())) return false;
-  const String text = Storage.readFile(path.c_str());
-  out = bookbuddy::parse(std::string(text.c_str()));
+  std::string text;
+  if (!readWhole(path.c_str(), text)) {
+    out.invalid = true;
+    out.error = "The file would not open";
+    LOG_ERR(kLog, "%s would not open", path.c_str());
+    return false;
+  }
+  out = bookbuddy::parse(text);
   if (out.invalid) LOG_ERR(kLog, "%s: %s", path.c_str(), out.error.c_str());
   return !out.invalid;
 }
@@ -227,6 +284,7 @@ void LibraryActivity::quickImport(View& view) {
   // nothing rather than carrying nine sample books into the real one.
   std::vector<library::Book> next = fromFixture ? std::vector<library::Book>() : books;
   const library::UpdateReport done = library::applyQuick(next, parsed.books, view.destination);
+  restorePlots(next);
   books.swap(next);
   if (!saveDatabase()) {
     books.swap(next);
@@ -236,6 +294,7 @@ void LibraryActivity::quickImport(View& view) {
     return;
   }
   fromFixture = false;
+  dropPlots();
   save();
   // Out of the way of the next scan, name kept, so the file is still there to
   // look at. A failed move only means it is offered again.
@@ -302,6 +361,7 @@ void LibraryActivity::completeImport(View& view) {
   // nothing rather than carrying nine sample books into the real one.
   std::vector<library::Book> next = fromFixture ? std::vector<library::Book>() : books;
   const library::UpdateReport done = library::applyComplete(next, mine.books, wish.books);
+  restorePlots(next);
   books.swap(next);
   if (!saveDatabase()) {
     books.swap(next);
@@ -309,6 +369,7 @@ void LibraryActivity::completeImport(View& view) {
     return;
   }
   fromFixture = false;
+  dropPlots();
   save();
   std::string text = totals(done) + "\n";
   text += counted(done.added, "new book", "new books") + "\n";
@@ -342,7 +403,9 @@ void LibraryActivity::backup() {
     } while (Storage.exists((std::string(library::kBackupDir) + "/" + name).c_str()) && n < 10000);
   }
   const std::string path = std::string(library::kBackupDir) + "/" + name;
-  const std::string text = library::encodeBackup(books);
+  std::vector<library::Book> whole = books;
+  restorePlots(whole);
+  const std::string text = library::encodeBackup(whole);
   if (!Storage.writeFile(path.c_str(), String(text.c_str()))) {
     LOG_ERR(kLog, "Could not write %s", path.c_str());
     showReport(kBackupTitle, "Could not write\n" + path + "\n\nNothing was saved.");
@@ -863,7 +926,9 @@ void LibraryActivity::renderDetail(toybox::Screen& screen, View& view) {
   model.series = book.series.c_str();
   model.pages = book.pages.c_str();
   model.language = book.language.c_str();
-  model.plot = book.plot.c_str();
+  // Fetched from the card only when the section is open: the summary is the
+  // one part of a book this activity does not keep in RAM.
+  model.plot = view.plotSection ? plotOf(book).c_str() : "";
   model.showRead = book.collection == library::Collection::MyBooks;
   model.readState = library::readStateText(book.state);
   model.rating = library::ratingText(book.rating);

@@ -87,6 +87,12 @@ class LibraryActivity final : public Activity {
   // The database file, written whole to a temporary name and renamed over the
   // old one, so a failure half way leaves the previous library intact.
   bool saveDatabase();
+  // The summaries stay on the card. These fetch one book's from the database
+  // when its SUMMARY opens, and put every book's back into a copy of the
+  // library about to be written or backed up.
+  const std::string& plotOf(const library::Book& book);
+  void restorePlots(std::vector<library::Book>& into);
+  void dropPlots();
   void search(library::Browse browse);
   void push(const View& view);
   void handle(const freeink::ui::ActionEvent& event);
@@ -124,6 +130,9 @@ class LibraryActivity final : public Activity {
   // True while `books` is sampleBooks() standing in for a database that does
   // not exist yet. The first update starts from an empty library, not from them.
   bool fromFixture = false;
+  // The one summary in RAM: the book whose SUMMARY is open, by id.
+  std::string plotCacheId;
+  std::string plotCache;
   std::vector<View> stack;
   // Scratch the models borrow for the length of a build. Members rather than
   // locals because render() runs on an 8 KB stack.

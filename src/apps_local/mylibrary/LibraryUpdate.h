@@ -89,8 +89,14 @@ void refreshMetadata(const bookbuddy::ImportedBook& from, Book& onto);
 // written as \t, \n and \\.
 std::string encodeDatabase(const std::vector<Book>& books);
 // Reads what it can. `out` is replaced; a damaged line is skipped. False when
-// the text is not a database at all (no version line).
-bool decodeDatabase(const std::string& text, std::vector<Book>& out);
+// the text is not a database at all (no version line). With `withPlots`
+// false the summaries are left empty: they are most of the file, and the
+// device keeps them on the card and reads one when a book's SUMMARY opens.
+bool decodeDatabase(const std::string& text, std::vector<Book>& out, bool withPlots = true);
+// Fills the empty plot of every book in `books` from `text`, a database, by
+// id. The other half of `withPlots`: before the database is rewritten, the
+// summaries the RAM copy does not hold are put back from the file it replaces.
+void restorePlots(const std::string& text, std::vector<Book>& books);
 
 // ---- the backup ---------------------------------------------------------------
 //
